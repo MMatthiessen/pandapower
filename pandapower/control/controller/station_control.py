@@ -1,6 +1,7 @@
 import numbers
 from cmath import isnan
 import numpy as np
+from collections.abc import Sequence
 from numba.core.ir import Raise
 from numpy.ma.extras import atleast_1d
 from scipy.optimize import minimize
@@ -84,16 +85,43 @@ class BinarySearchControl(Controller):
     def __init__(self, net, ctrl_in_service:bool, output_element, output_variable, output_element_index,
                  output_element_in_service, input_element, input_variable,
                  input_element_index, set_point:float, output_values_distribution:str, output_distribution_values = None,
-                 modus:str = None, tol=0.001, order=0, level=0,
+                 modus:str = None, name = "", input_inverted:list=None, gen_q_response:list=None, tol=0.001, order=0, level=0,
                  drop_same_existing_ctrl=False, matching_params=None, **kwargs):
         super().__init__(net, in_service=ctrl_in_service, order=order, level=level,
                          drop_same_existing_ctrl=drop_same_existing_ctrl,
                          matching_params=matching_params)
-        self.redistribute_values = None  # Values to save for redistributed gens
-        self.counter_warning = False #only one message that only one active output element
+        # write kwargs in self
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+        ###allocating variables
+        self.name = name #name of controller, not unambiguous
+        self.set_point = set_point
+        self.tol = tol #tolerance
+        self.input_sign = []#direction of Q at element
+        self.input_variable = [] #unit of controlled element Q
+        self.input_variable_p = [] #unit of controlled element P
+        self.input_element_in_service = []
+        self.input_element_index = []  # for boundaries
         self.in_service = ctrl_in_service
         self.input_element = input_element #point to be controlled
+        self.output_values = None
+        self.output_values_old = None
         self.output_element = output_element #typically sgens, output of Q
+        self.output_distribution_values = output_distribution_values
+        self.max_q_mvar = [] #limits of output element Q
+        self.min_q_mvar = []
+        self.diff = None
+        self.diff_old = None
+        self.converged = False  # criteria for success of controller
+        self.overwrite_convergence = False  # for droop
+        self.redistribute_values = None  # Values to save for redistributed gens
+        self.counter_warning = False  # only one message that only one active output element
+        self.read_flag = []  # type of read value
+        self.write_flag, self.output_variable = _detect_read_write_flag(net, output_element, output_element_index,
+                                                                        output_variable)
+        ###catching errors in variables, allocating
+        if input_inverted is None: input_inverted = []#for robustness
+        if gen_q_response is None: gen_q_response = []#robustness and legacy
         if isinstance(output_element_index, list) or isinstance(output_element_index, np.ndarray):
             self.output_element_index = [int(item) for item in output_element_index]
         else:
@@ -107,9 +135,6 @@ class BinarySearchControl(Controller):
         self.output_values_distribution = (output_values_distribution[0] if ((isinstance(output_values_distribution, list)
             or isinstance(output_values_distribution, np.ndarray)) and isinstance(output_values_distribution[0], str)
             ) else output_values_distribution)#ruggedized code for miss input
-        self.output_distribution_values = output_distribution_values
-        self.set_point = set_point
-        self.input_element_index = []  # for boundaries
         if input_element_index == 'auto':
             self.automatic_selection(net)
         elif isinstance(input_element_index, list) or isinstance(input_element_index, np.ndarray):
@@ -117,27 +142,9 @@ class BinarySearchControl(Controller):
                 self.input_element_index.append(element)
         else:
             self.input_element_index.append(input_element_index)
-        self.tol = tol #tolerance
         if self.tol is None: #old order
             self.tol = 0.001
-        self.output_values = None
-        self.output_values_old = None
-        self.diff = None
-        self.diff_old = None
-        self.converged = False #criteria for success of controller
-        self.overwrite_convergence = False #for droop
-        self.write_flag, self.output_variable = _detect_read_write_flag(net, output_element, output_element_index,
-                                                                        output_variable)
-        # write kwargs in self
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-        self.read_flag = [] #type of read value
-        self.input_variable = [] #unit of controlled element Q
-        self.input_variable_p = [] #unit of controlled element P
-        self.input_element_in_service = []
-        self.max_q_mvar = [] #limits of output element Q
-        self.min_q_mvar = []
-
+        ###allocating distribution method and distribution values
         if self.output_values_distribution == 'rel_V_pu':
             self.bus_idx_dist = [] #initializing bus idx
             output_distribution_values = np.array(self.output_distribution_values) #forming limit arrays
@@ -172,7 +179,7 @@ class BinarySearchControl(Controller):
                     self.v_max_pu = output_distribution_values[:, 2]
             else:
                 self.output_distribution_values = None
-        ###finding correct modus, catching deprecated voltage_ctrl argument###
+        ###finding correct modus, catching deprecated voltage_ctrl argument###todo unambiguous modus also with droop
         if modus is None: #catching old attribute voltage_ctrl
             if hasattr(self, 'voltage_ctrl'):
                 modus = self.voltage_ctrl
@@ -181,7 +188,6 @@ class BinarySearchControl(Controller):
                         f"'voltage_ctrl' in Controller {self.index} is deprecated. "
                         "Use 'modus' ('Q_ctrl', 'V_ctrl', etc.) instead.")
                     self._deprecation_warned = True
-
         if type(modus) == bool and modus == True: #Only functions written out!?!
             self.modus = "V_ctrl"
             logger.warning(f"Deprecated Controller modus for Controller {self.index}, using 'V_ctrl' from available"
@@ -268,6 +274,28 @@ class BinarySearchControl(Controller):
                 max_q = 20
             self.max_q_mvar.append(max(min_q, max_q)) #if min > max, switch
             self.min_q_mvar.append(min(min_q, max_q))
+
+        ###directions of q and inverted index
+        n = len(self.input_element_index)
+        if input_inverted is None or (isinstance(input_inverted, Sequence) and len(input_inverted) == 0):
+            # empty, then set all entries to 1
+            self.input_sign = [1] * n
+        elif isinstance(input_inverted, bool):
+            # single bool, then set all entries to desired value +/-1
+            self.input_sign = ([-1] if input_inverted else [1]) * n
+        else:
+            inv_list = list(input_inverted)[:n]
+            if len(inv_list) < n:
+                inv_list += [False] * (n - len(inv_list))
+            self.input_sign = [-1 if inv else 1 for inv in inv_list]
+        n = len(self.output_element_index)
+        if gen_q_response is None or (isinstance(gen_q_response, Sequence) and len(gen_q_response) == 0):
+            # empty, then set all entries to 1
+            self.gen_Q_response = [1] * n
+        else:
+            if len(gen_q_response) < n:
+                gen_q_response += [1] * (n - len(gen_q_response))  # missing entries with +1
+            self.gen_Q_response = gen_q_response
 
     def __str__(self):
         return super().__str__() + " [%s.%s.%s.%s]" % (
@@ -364,7 +392,8 @@ class BinarySearchControl(Controller):
         # if controller not in_service, return True
         self.in_service = net.controller.in_service[self.index]
         if not self.in_service:
-            return True
+            self.converged = True
+            return self.converged
         ###updating input & output elements in service lists
         self.input_element_in_service = list(self.input_element_in_service)
         self.output_element_in_service = list(self.output_element_in_service)
@@ -375,10 +404,14 @@ class BinarySearchControl(Controller):
                 self.input_element_in_service.append(net.line.in_service[input_index])
             elif self.input_element == "res_trafo":
                 self.input_element_in_service.append(net.trafo.in_service[input_index])
+            elif self.input_element == "res_trafo3w":
+                self.input_element_in_service.append(net.trafo3w.in_service[input_index])
             elif self.input_element == "res_switch":
                 self.input_element_in_service.append(net.switch.closed[input_index])
             elif self.input_element == "res_bus":
                 self.input_element_in_service.append(net.bus.in_service[input_index])
+            elif self.input_element == "res_gen":
+                self.input_element_in_service.append(net.gen.in_service[input_index])
         for output_index in self.output_element_index:
             if self.output_element == "gen":
                 self.output_element_in_service.append(net.gen.in_service[output_index])
@@ -389,10 +422,10 @@ class BinarySearchControl(Controller):
 
         # check if at least one input and one output element is in_service
         if not (any(self.input_element_in_service) and any(self.output_element_in_service)):
-            logger.warning(f"Controller {self.index} has no active output elements: {self.output_element}:"
-                           f" {self.output_element_index} are disabled.\n Control aborted\n")
+            logger.warning("Input and/or output elements for controller %i out of service, putting controller "
+                           "out of service" % self.index)
             self.converged = True
-            net.controller.in_service[self.index] = False
+            net.controller.loc[self.index, "in_service"] = False
             self.in_service = False
             return self.converged
         # if only one output element is in service
@@ -814,7 +847,7 @@ class BinarySearchControl(Controller):
                         equal = 1 / sum(self.output_element_in_service)
                         distribution = np.full(np.sum(np.array(self.output_element_in_service)), equal)
                     x = x * distribution if isinstance(x, numbers.Number) else sum(x) * distribution #add distribution to Q values
-            x = np.sign(x) * (np.where(abs(abs(x) - abs(self.output_values)) > 84, 84, abs(x)))  # catching distributions out of bounds, 84 seems to be the maximum
+            x = np.sign(x) * (np.where(abs(abs(x) - abs(self.output_values)) > 84, 84, abs(x)))# catching distributions out of bounds, 84 seems to be the maximum
             self.output_values_old, self.output_values = self.output_values, x
 
             ### write new set of Q values to output elements###
@@ -985,17 +1018,18 @@ class DroopControl(Controller):
 
                 **tol = 1e-6** - Tolerance criteria of controller convergence.
            """
-    def __init__(self, net, controller_idx:int, in_service:bool=True, modus:str = None, q_droop_mvar = None,
+    def __init__(self, net, controller_idx:int = None, in_service:bool=True, modus:str = None, q_droop_mvar = None,
                  bus_idx=None, vm_set_lb=None, vm_set_ub=None, pf_overexcited=None, pf_underexcited=None,
                  input_element_q_meas:str = None, input_variable_q_meas = None, input_element_index_q_meas = None, tol=1e-6,
-                 order=-1, level=0, drop_same_existing_ctrl=False, matching_params=None, **kwargs):
+                 order=-1, level=0, name = "", drop_same_existing_ctrl=False, matching_params=None, **kwargs):
         super().__init__(net, in_service=in_service, order=order, level=level, drop_same_existing_ctrl=drop_same_existing_ctrl,
                          matching_params=matching_params)
         # TODO: implement maximum and minimum of droop control
         # write kwargs in self
         for key, value in kwargs.items():
             setattr(self, key, value)
-        self.q_droop_mvar = q_droop_mvar #droop in Q_ctrl
+        self.name = name
+
         self.input_element_q_meas = input_element_q_meas
         self.input_variable_q_meas = input_variable_q_meas
         self.input_element_index_q_meas = input_element_index_q_meas
@@ -1004,7 +1038,7 @@ class DroopControl(Controller):
         self.vm_pu_old = self.vm_pu
         self.controller_idx = controller_idx
         self.vm_set_pu = net.controller.at[self.controller_idx, "object"].set_point
-        self.vm_set_pu_new = None
+        self.vm_set_pu_new = None #todo where to get vm_set_pu
         self.lb_voltage = vm_set_lb
         self.ub_voltage = vm_set_ub
         self.tol = tol
@@ -1012,6 +1046,7 @@ class DroopControl(Controller):
         self.q_set_mvar_bsc = None
         self.q_set_mvar = None
         self.q_set_old_mvar = None
+        self.q_droop_mvar = q_droop_mvar #droop in Q_ctrl
         self.diff = None
         self.converged = False
         self.pf_over = pf_overexcited
@@ -1099,8 +1134,10 @@ class DroopControl(Controller):
 
     def is_converged(self, net):
         ###check convergence
-        if not net.controller.at[self.controller_idx, "object"].in_service:
-            return True
+        if (not net.controller.at[self.controller_idx, "object"].in_service or
+                net.controller.at[self.controller_idx, "object"].converged):
+            self.converged = True
+            return self.converged
         if self.modus != net.controller.at[self.controller_idx, 'object'].modus:#checking if droop and bsc have the same modus
             if (self.modus != 'PF_ctrl_P' and self.modus != 'PF_ctrl_V' and #here the droop is included in the string
                 (net.controller.at[self.controller_idx, 'object'].modus != True and self.modus != True)):#converting in process
@@ -1318,3 +1355,89 @@ class DroopControl(Controller):
                     input_values.append(read_from_net(net, input_element, input_index, str(input_variable[counter]), read_flag[counter]))
             self.vm_set_pu_new = self.vm_set_pu + sum(input_values) / self.q_droop_mvar #only sum, not divided by elements
             net.controller.at[self.controller_idx, "object"].set_point = self.vm_set_pu_new
+
+
+class VDroopControl_local(Controller):
+    """
+    The VDroopControl_local is used in case of a local droop based voltage control. It is used in addition to
+    a binary search controller (bsc). The linked binary search controller is specified using the controller index,
+    which refers to the linked bsc.
+
+    INPUT:
+        **self**
+
+        **net** - A pandapower grid.
+
+        **q_droop_var** - Droop Value in Mvar/p.u.
+
+        **vm_set_pu_bsc** - Inital voltage set point.
+
+        **controller_idx** - Index of linked Binary< search control (if present).
+
+        **tol=1e-6** - Tolerance criteria of controller convergence.
+
+        **vm_set_lb=None** - Lower band border of dead band
+
+        **vm_set_ub=None** - Upper band border of dead band
+       """
+
+    def __init__(self, net, q_droop_mvar, controller_idx, bus_idx, tol=1e-6, in_service=True, order=-1, level=0,
+                 name="", drop_same_existing_ctrl=False, matching_params=None, q_set_mvar=None, vm_set_pu_bsc=None,
+                 vm_set_lb=None, vm_set_ub=None, **kwargs):
+        super().__init__(net, in_service=in_service, order=order, level=level,
+                         drop_same_existing_ctrl=drop_same_existing_ctrl,
+                         matching_params=matching_params)
+        # TODO: implement maximum and minimum of droop control
+        # write kwargs in self
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+        self.name = name
+        self.q_droop_mvar = q_droop_mvar
+        self.vm_pu = None
+        self.vm_pu_old = self.vm_pu
+        value = vm_set_pu_bsc if vm_set_pu_bsc is not None else kwargs.get('vm_set_pu')
+        self.vm_set_pu_bsc = value
+        self.vm_set_pu_new = None
+        self.q_set_mvar = q_set_mvar
+        self.lb_voltage = vm_set_lb
+        self.ub_voltage = vm_set_ub
+        self.controller_idx = controller_idx
+        self.bus_idx = bus_idx
+        self.tol = tol
+        self.applied = False
+        gen_idx = net.controller.at[self.controller_idx, "object"].input_element_index[0]
+        self.read_flag, self.input_variable = _detect_read_write_flag(net, "res_bus", bus_idx, "vm_pu")
+        self.diff = None
+        self.converged = False
+
+    def is_converged(self, net):
+        if (not net.controller.at[self.controller_idx, "object"].in_service or
+                net.controller.at[self.controller_idx, "object"].converged):
+            self.converged = True
+            return self.converged
+
+        self.diff = (net.controller.at[self.controller_idx, "object"].set_point -
+                     read_from_net(net, "res_bus", self.bus_idx, "vm_pu", self.read_flag))
+        self.converged = np.all(np.abs(self.diff) < self.tol)
+        return self.converged
+
+    def control_step(self, net):
+        self._Vdroopcontrol_step(net)
+
+    def _Vdroopcontrol_step(self, net):
+        self.vm_pu_old = self.vm_pu
+        self.vm_pu = read_from_net(net, "res_bus", self.bus_idx, "vm_pu", self.read_flag)
+
+        input_element = net.controller.at[self.controller_idx, "object"].input_element
+        input_element_index = net.controller.at[self.controller_idx, "object"].input_element_index
+        input_variable = net.controller.at[self.controller_idx, "object"].input_variable
+        read_flag = net.controller.at[self.controller_idx, "object"].read_flag
+        input_values = []
+        counter = 0
+        for input_index in input_element_index:
+            input_values.append(read_from_net(net, input_element, input_index,
+                                              input_variable[counter], read_flag[counter]))
+        input_values = (net.controller.at[self.controller_idx, "object"].input_sign * np.asarray(input_values)).tolist()
+        self.vm_set_pu_new = self.vm_set_pu_bsc - (sum(
+            input_values) - self.q_set_mvar) / self.q_droop_mvar
+        net.controller.at[self.controller_idx, "object"].set_point = self.vm_set_pu_new
