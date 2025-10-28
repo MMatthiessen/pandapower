@@ -21,14 +21,13 @@ from pandapower.create import create_empty_network, create_bus, create_bus_dc, c
     create_shunt, create_line, create_line_from_parameters, create_line_dc, create_sgen, create_gen, create_ext_grid, \
     create_asymmetric_sgen, create_line_dc_from_parameters, create_asymmetric_load, create_transformer, \
     create_transformer_from_parameters, create_transformer3w_from_parameters, create_impedance, create_xward, \
-    create_ward, create_series_reactor_as_impedance
+    create_ward, create_series_reactor_as_impedance, create_vsc as _create_vsc
 from pandapower.results import reset_results
 from pandapower.run import set_user_pf_options
 from pandapower.std_types import add_zero_impedance_parameters, std_type_exists, create_std_type, available_std_types, \
     load_std_type
 from pandapower.toolbox.grid_modification import set_isolated_areas_out_of_service, drop_inactive_elements, drop_buses
 from pandapower.topology import create_nxgraph, calc_distance_to_bus
-from pandapower.topology import calc_distance_to_bus
 from pandapower.control.util.auxiliary import create_q_capability_characteristics_object
 from pandapower.control.util.characteristic import SplineCharacteristic
 
@@ -112,8 +111,8 @@ def from_pf(
             create_pp_load(net=net, item=load, pf_variable_p_loads=pf_variable_p_loads,
                            dict_net=dict_net, is_unbalanced=is_unbalanced)
         except RuntimeError as err:
-            logger.debug('load failed at import and was not imported: %s' % err)
-    if n > 0: logger.info('imported %d loads' % n)
+            logger.debug(f'load failed at import and was not imported: {err}')
+    if n > 0: logger.info(f'imported {n} loads')
 
     logger.debug('creating lv loads')
     # create loads:
@@ -123,8 +122,8 @@ def from_pf(
             create_pp_load(net=net, item=load, pf_variable_p_loads=pf_variable_p_loads,
                            dict_net=dict_net, is_unbalanced=is_unbalanced)
         except RuntimeError as err:
-            logger.warning('load failed at import and was not imported: %s' % err)
-    if n > 0: logger.info('imported %d lv loads' % n)
+            logger.warning(f'load failed at import and was not imported: {err}')
+    if n > 0: logger.info(f'imported {n} lv loads')
 
     logger.debug('creating mv loads')
     # create loads:
@@ -134,8 +133,8 @@ def from_pf(
             create_pp_load(net=net, item=load, pf_variable_p_loads=pf_variable_p_loads,
                            dict_net=dict_net, is_unbalanced=is_unbalanced)
         except RuntimeError as err:
-            logger.error('load failed at import and was not imported: %s' % err)
-    if n > 0: logger.info('imported %d mv loads' % n)
+            logger.error(f'load failed at import and was not imported: {err}')
+    if n > 0: logger.info(f'imported {n} mv loads')
 
     #    logger.debug('sum loads: %.3f' % sum(net.load.loc[net.load.in_service, 'p_mw']))
 
@@ -291,16 +290,16 @@ def from_pf(
         set_user_pf_options(net, voltage_depend_loads=True)
     else:
         set_user_pf_options(net, voltage_depend_loads=False)
-
+        
     if len(dict_net['ElmLodlvp']) > 0:
-
+        
         # ElmLodlvp within line
-        # here we split lines and import the partial LV loads that are part of lines
+        # here we split lines and import the partial LV loads that are part of lines 
         lvp_lne_dict = get_lvp_for_lines(dict_net)
         logger.debug(lvp_lne_dict)
         split_all_lines(net, lvp_lne_dict)
         if len(lvp_lne_dict) > 0: logger.info('imported %d partial loads on line, seperated line' % len(lvp_lne_dict))
-
+        
         # ElmLodLvp within load (ElmLodlv)
         lvp_lod_items = [lvp for lvp in dict_net['ElmLodlvp'] if lvp.fold_id.GetClassName() == 'ElmLodlv']
         logger.debug('creating lv partial loads')
@@ -311,10 +310,10 @@ def from_pf(
                 create_pp_load(net=net, item=load, pf_variable_p_loads=pf_variable_p_loads,
                                dict_net=dict_net, is_unbalanced=is_unbalanced)
             except RuntimeError as err:
-                logger.warning('load failed at import and was not imported: %s' % err)
-        if n > 0: logger.info('imported %d lv loads' % n)
-
-
+                logger.warning(f'load failed at import and was not imported: {err}')
+        if n > 0: logger.info(f'imported {n} lv loads')
+        
+        
     # create station controllers (ElmStactrl):
     if export_controller:
         n = 0
@@ -1780,9 +1779,9 @@ def create_pp_load(net, item, pf_variable_p_loads, dict_net, is_unbalanced):
                               variables=('p_mw', 'sn_mva'))) # 'chr_name'
             if bool(item.GetAttribute('e:cHasPartLod')): #item.HasAttribute('e:cHasPartLod'):
                 params['partial_loads_included']=True
-            else:
+            else: 
                 params['partial_loads_included']=False
-
+                
         except Exception as err:
             logger.error("m:P:bus1 and m:Q:bus1 should be used with ElmLodlv")
             logger.error('While creating load %s, error occurred for '
@@ -1792,7 +1791,6 @@ def create_pp_load(net, item, pf_variable_p_loads, dict_net, is_unbalanced):
     elif load_class == 'ElmLodmv':
         params.update(ask(item, pf_variable_p_loads=pf_variable_p_loads,
                           dict_net=dict_net, variables=('p_mw', 'sn_mva')))
-
 
     elif load_class == 'ElmLod':
         params.update(ask(item, pf_variable_p_loads=pf_variable_p_loads,
@@ -1859,7 +1857,7 @@ def create_pp_load(net, item, pf_variable_p_loads, dict_net, is_unbalanced):
             params["const_i_q_percent"] = i_q
             params["const_z_q_percent"] = z_q
 
-    ### for now - don't import ElmLodlvp
+    ### added
     elif load_class == 'ElmLodlvp':
         params.update(ask(item, pf_variable_p_loads, dict_net=dict_net,
                                       variables=('p_mw','sn_mva')))
@@ -1872,18 +1870,18 @@ def create_pp_load(net, item, pf_variable_p_loads, dict_net, is_unbalanced):
             params['parent_load_index'] = net.load.loc[net.load.name == parent.loc_name].index.tolist()[0]
             bus_is_known = True
             params['bus'] = net.load.loc[net.load.name==parent.loc_name, 'bus'].values[0]
-
+        
             # check for night storange heater
             if item.pnight!=0:
                 if item.plini==0:
                     # there is a extra Elmlodlvp only containing the night storage heater
                     scale_p_night = dict_net['lvp_params']['scPnight'] / 100
                     params['p_mw'] = item.pnight*scale_p_night / 1000 # is given in kW, we need MW
-                else:
+                else: 
                     logger.warning(
                         'item <%s> has a night storange heater integrated and a load '
                         '- not implemented yet!' % (item.loc_name))
-
+                              
         # elif parent_class == 'ElmLne':
         #     logger.debug('creating load that is part of line %s' % parent)
         #     params.update(ask(item, pf_variable_p_loads=pf_variable_p_loads,
@@ -2120,7 +2118,7 @@ def create_sgen_genstat(net, item, pv_as_slack, pf_variable_p_gen, dict_net, is_
                 else:
                     logger.error('Error! av_mode undefined')
                     return
-        if av_mode == 'constv':
+        if av_mode == 'constv' or av_mode == 'vdroop':
             logger.debug('av_mode: %s - creating as gen' % av_mode)
             params.vm_pu = item.usetp
             if pstac is not None and not pstac.outserv and export_ctrl:
@@ -2135,28 +2133,28 @@ def create_sgen_genstat(net, item, pv_as_slack, pf_variable_p_gen, dict_net, is_
                         params.vm_pu = pstac.usetp
                     else:
                         params.vm_pu = pstac.cpCtrlNode.vtarget  # Bus target voltage
-        if av_mode == 'vdroop':
-            try:
-                params.vm_pu = item.GetAttribute('m:u:bus1')
-            except AttributeError:
-                pass
-            controlled_node = item.bus1
-            bus = bus_dict[controlled_node.cterm]
-            next_index = net.gen.index[-1] + 1 if len(net.gen) > 0 else 0
-            ddroop = item.ddroop + 1e-6 if item.ddroop == 0 else item.ddroop
-            if not item.ddroop == 0:
-                bsc = BinarySearchControl(net, name=item.loc_name + "_ctrl", ctrl_in_service=not item.outserv,
-                                          output_element="gen", output_variable="vm_pu",
-                                          output_element_index=[next_index],
-                                          output_element_in_service=[not item.outserv],
-                                          output_values_distribution=[1],
-                                          input_element="res_gen", input_variable="q_mvar",
-                                          input_inverted=[False], gen_Q_response=[1],
-                                          input_element_index=[next_index], set_point=item.usetp,
-                                          voltage_ctrl=True, bus_idx=bus, tol=1e-5)
-                VDroopControl_local(net, name=item.loc_name + "_ctrl", q_droop_mvar=item.sgn * 100 / ddroop,
-                                    q_set_mvar=item.qgini, vm_set_pu_bsc=item.usetp, bus_idx=bus,
-                                    controller_idx=bsc.index)
+            if av_mode == 'vdroop':
+                try:
+                    params.vm_pu = item.GetAttribute('m:u:bus1')
+                except AttributeError:
+                    pass
+                controlled_node = item.bus1
+                bus = bus_dict[controlled_node.cterm]
+                next_index = net.gen.index[-1] + 1 if len(net.gen) > 0 else 0
+                ddroop = item.ddroop + 1e-6 if item.ddroop == 0 else item.ddroop
+                if not item.ddroop == 0:
+                    bsc = BinarySearchControl(net, name=item.loc_name + "_ctrl", ctrl_in_service=not item.outserv,
+                                              output_element="gen", output_variable="vm_pu",
+                                              output_element_index=[next_index],
+                                              output_element_in_service=[not item.outserv],
+                                              output_values_distribution=[1],
+                                              input_element="res_gen", input_variable="q_mvar",
+                                              input_inverted=[False], gen_Q_response=[1],
+                                              input_element_index=[next_index], set_point=item.usetp,
+                                              voltage_ctrl=True, bus_idx=bus, tol=1e-5)
+                    VDroopControl_local(net, name=item.loc_name + "_ctrl", q_droop_mvar=item.sgn * 100 / ddroop,
+                                        q_set_mvar=item.qgini, vm_set_pu_bsc=item.usetp, bus_idx=bus,
+                                        controller_idx=bsc.index)
             del params['q_mvar']
 
             # add reactive and active power limits
@@ -2177,11 +2175,8 @@ def create_sgen_genstat(net, item, pv_as_slack, pf_variable_p_gen, dict_net, is_
                     try:
                         params['q_mvar'] = item.GetAttribute('m:Q:bus1')
                     except AttributeError:
-                        print("Exception q_mvar not available! Outserv: ")
-                        print(item.GetFullName())
-                        print(item.outserv)
-                        print(pstac.outserv)
                         pass
+                # add reactive and active power limits
                 params.min_q_mvar = item.cQ_min
                 params.max_q_mvar = item.cQ_max
                 params.min_p_mw = item.Pmin_uc
@@ -2313,7 +2308,7 @@ def create_sgen_neg_load(net, item, pf_variable_p_loads, dict_net):
 
     net.sgen.loc[sg, 'description'] = ' \n '.join(item.desc) if len(item.desc) > 0 else ''
     add_additional_attributes(item, net, "sgen", sg, attr_dict={"for_name": "equipment", "cimRdfId": "origin_id",
-                              "cpSite.loc_name": "site"},
+                                                                "cpSite.loc_name": "site"},
                               attr_list=["sernum", "chr_name"])
 
     if item.HasResults(0):  # 'm' results...
@@ -2593,7 +2588,6 @@ def create_trafo_type(net, item):
         elif item.tapchtype2 == 2:
             tap2_changer_type = "Symmetrical"
 
-
         type_data.update({
             "tap2_side": ['hv', 'lv', 'ext'][item.tap_side2],  # 'ext' not implemented
             # see if it is an ideal phase shifter or a complex phase shifter
@@ -2857,6 +2851,7 @@ def add_tap_dependent_impedance_for_trafo(item, net, pf_type, tid):
     net.trafo.loc[tid, ['tap_dependency_table', 'id_characteristic_table', 'tap_changer_type']] = [True, index,
                                                                                                    'Tabular']
     del net['temporary_characteristics']
+
 
 def create_trafo_characteristics_from_measurement_protocol(item, net, pf_type):
     last_index = net["trafo_characteristic_table"]['id_characteristic'].max() if not net[
@@ -3853,7 +3848,7 @@ def create_vscmono(net, item):
             f"VSCmono element {params['name']} has no DC resistive loss factor - power flow will not converge!"
         )
 
-    vid = create_vsc(net, **params)
+    vid = _create_vsc(net, **params)
     logger.debug(f'created VSC {vid} for vscmono {item.loc_name}')
 
     result_variables = {"pf_p_mw": "m:P:busac",
@@ -3902,8 +3897,8 @@ def create_vsc(net, item):
     if params["r_dc_ohm"] == 0:
         logger.warning(f"VSC element {params['name']} has no DC resistive loss factor - power flow will not converge!")
 
-    vid_1 = create_vsc(net, bus=bus, bus_dc=bus_dc_n, **params)
-    vid_2 = create_vsc(net, bus=bus, bus_dc=bus_dc_p, **params)
+    vid_1 = _create_vsc(net, bus=bus, bus_dc=bus_dc_n, **params)
+    vid_2 = _create_vsc(net, bus=bus, bus_dc=bus_dc_p, **params)
     logger.debug(f'created two vsc mono {vid_1}, {vid_2} for vsc {item.loc_name}')
 
     result_variables = {"pf_p_mw": "m:P:busac",
@@ -4598,6 +4593,8 @@ def create_stactrl(net, item, **kwargs):
         )
     else:
         raise NotImplementedError(f"{item}: control mode {item.i_ctrl=} not implemented")
+
+
 def GetBranchElementFromSwitch(net, q_control_element, graph):
     """
     Searches for the nearest branch element (line or transformer 2W/3W) for each switch
@@ -4938,11 +4935,11 @@ def calc_segment_length(x1, y1, x2, y2):
 
 def get_scale_factor(length_line, coords):
     if np.isscalar(coords):  # single value
-        if np.isnan(coords):
-            return np.nan
+        if pd.isna(coords):
+            return None
     else:  # array or list
-        if np.any(np.isnan(coords)):
-            return np.nan
+        if np.any(pd.isna(coords)):
+            return None
     temp_len = 0
     num_coords = len(coords)
     for i in range(num_coords - 1):
@@ -4964,7 +4961,7 @@ def break_coords_sections(coords, section_length, scale_factor_length):
     else:  # array or list
         if np.any(np.isnan(coords)):
             return [[np.nan, np.nan]], [[np.nan, np.nan]]
-
+    
     # if any(coords) is np.nan:
     #     return [[np.nan, np.nan]], [[np.nan, np.nan]]
 
@@ -5003,18 +5000,18 @@ def set_new_coords(net, bus_id, line_idx, new_line_idx, line_length, pos_at_line
     logger.debug('got coords for line %s' % line_idx)
 
     scale_factor_length = get_scale_factor(line_length, line_coords)
-
-    if np.isnan(scale_factor_length):
+    
+    if pd.isna(scale_factor_length):
         logger.warning("Could not generate geodata for line sections (partial loads on line)!")
     else:
         section_coords, new_coords = break_coords_sections(line_coords, pos_at_line,
                                                            scale_factor_length)
-
+    
         logger.debug('calculated new coords: %s, %s ' % (section_coords, new_coords))
-
+    
         net.line.at[line_idx, 'geo'] = geojson.dumps(geojson.LineString(section_coords))
         net.line.at[new_line_idx, 'geo'] = geojson.dumps(geojson.LineString(new_coords))
-
+        
         net.bus.at[bus_id, 'geo'] = geojson.dumps(geojson.Point(new_coords[0]))
 
 
@@ -5095,6 +5092,7 @@ def get_lvp_for_lines(dict_net):
 
         lvp_dict[line].sort(key=lambda tup: tup[1])
     return lvp_dict
+
 
 def get_pos_at_sec(net, lvp_dict, line_item, load_item):
     # find position of ElmLodlvp at the section
@@ -5205,6 +5203,7 @@ def remove_folder_of_std_types(net):
             for st in all_types:
                 net.std_types[element][std_type] = net.std_types[element].pop(st)
                 net[element].std_type = net[element].std_type.replace(st, std_type)
+
 
 def create_q_capability_curve(net, item):
     name = item.loc_name
