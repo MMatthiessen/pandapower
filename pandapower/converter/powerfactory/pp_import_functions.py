@@ -4332,10 +4332,10 @@ def create_stactrl(net, item, **kwargs):
         for m in range(len(output_busses)):
             has_path = has_path or nx.has_path(top, input_busses[n], output_busses[m])
     if not has_path and control_mode != 0 and not item.i_droop:
-        if control_mode ==1: modus = "Q"
-        elif control_mode == 2: modus = 'Power Factor'
-        else: modus = 'tangens'
-        logger.error(f'no path found, skipping {modus} controller')
+        if control_mode ==1: control_modus = "Q"
+        elif control_mode == 2: control_modus = 'Power Factor'
+        else: control_modus = 'tangens'
+        logger.error(f'no path found, skipping {control_modus} controller')
         return
 
     if control_mode == 0:  # VOLTAGE CONTROL
@@ -4357,7 +4357,7 @@ def create_stactrl(net, item, **kwargs):
                 for i in ref_buses:  # get distances of bus to possible buses
                     if len(net.ext_grid.bus) > 1:  # multiple external nets dont work
                         raise UserWarning(
-                            f'Multiple External Grids for control group in controller {len(net.controller)+1} with modus'
+                            f'Multiple External Grids for control group in controller {len(net.controller)+1} with control_modus'
                             f' V_ctrl, auto-selection of controlled busbar not possible, aborting\n') #todo what about multiple nets
                     g = create_nxgraph(net, respect_switches=True)  # create graph for connecting buses
                     distances_list.append(nx.shortest_path(g, source=i, target=int(
@@ -4384,7 +4384,7 @@ def create_stactrl(net, item, **kwargs):
             try:
                 v_set_point_pu = bus_dict_stactrl[bus].vtarget
             except KeyError:
-                logger.error(f"The automatically selected bus {bus} in Controller {len(net.controller)+1} with modus V_ctrl"
+                logger.error(f"The automatically selected bus {bus} in Controller {len(net.controller)+1} with control_modus V_ctrl"
                              f" has no target voltage, trying target voltage 1 pu\n")
                 v_set_point_pu = 1
         else:
@@ -4399,9 +4399,9 @@ def create_stactrl(net, item, **kwargs):
                                       output_distribution_values=distribution_val,
                                       input_element_index = bus,input_element='res_bus', input_variable='vm_pu',
                                       input_inverted=input_inverted, gen_Q_response=gen_Q_response,
-                                      set_point=v_set_point_pu,  modus='V_ctrl', tol=1e-6)
+                                      set_point=v_set_point_pu,  control_modus='V_ctrl', tol=1e-6)
             DroopControl(net, name=item.loc_name, q_droop_mvar=item.Srated * 100 / item.ddroop,
-                                      controller_idx=bsc.index, modus='V_ctrl', #vm_set_pu_bsc=v_setpoint_pu,todo?
+                                      controller_idx=bsc.index, control_modus ='V_ctrl', #vm_set_pu_bsc=v_setpoint_pu,todo?
                                       input_element_q_meas=res_element_table, input_variable_q_meas=variable,
                                       input_element_index_q_meas=res_element_index)
         else:
@@ -4413,7 +4413,7 @@ def create_stactrl(net, item, **kwargs):
                                 output_distribution_values=distribution_val, damping_factor=0.9,
                                 input_variable="vm_pu", input_element_index=bus,
                                 input_inverted=input_inverted, gen_Q_response=gen_Q_response,
-                                set_point=v_set_point_pu, modus='V_ctrl', tol=1e-6)
+                                set_point=v_set_point_pu, control_modus='V_ctrl', tol=1e-6)
     elif control_mode == 1:  # Q Control mode
         if item.iQorient != 0:
             if not stactrl_in_service:
@@ -4438,7 +4438,7 @@ def create_stactrl(net, item, **kwargs):
                 gen_Q_response=gen_Q_response,
                 input_element_index=res_element_index,
                 set_point=item.qsetp,
-                modus='Q_ctrl', tol=1e-6
+                control_modus='Q_ctrl', tol=1e-6
             )
         elif item.qu_char == 1:
             controlled_node = item.refbar
@@ -4459,7 +4459,7 @@ def create_stactrl(net, item, **kwargs):
                 gen_Q_response=gen_Q_response,
                 input_element_index=res_element_index,
                 set_point=item.qsetp,
-                modus='Q_ctrl',
+                control_modus='Q_ctrl',
                 bus_idx=bus,
                 tol=1e-6
             )
@@ -4473,7 +4473,7 @@ def create_stactrl(net, item, **kwargs):
                 vm_set_lb=item.udeadblow,
                 q_set_mvar_bsc=item.qsetp,
                 controller_idx=bsc.index,
-                modus='Q_ctrl'
+                control_modus ='Q_ctrl'
             )
         else:
             raise NotImplementedError
@@ -4484,11 +4484,11 @@ def create_stactrl(net, item, **kwargs):
             raise NotImplementedError(f"{item}: Q orientation '-' not supported")
         if item.cosphi_char == 0:
             if item.pf_recap == 0: #0 -> inductive, 1 -> capacitive
-                modus = 'PF_ctrl_ind'
+                control_modus = 'PF_ctrl_ind'
             else:
                 if item.pf_recap != 1:
                     logger.error('Powerfactor without specified reactance\nassuming capacitive system\n')
-                modus = 'PF_ctrl_cap'
+                control_modus = 'PF_ctrl_cap'
             BinarySearchControl(
                 net, ctrl_in_service=stactrl_in_service,
                 output_element=gen_element,
@@ -4502,13 +4502,13 @@ def create_stactrl(net, item, **kwargs):
                 input_variable=variable,
                 input_element_index=res_element_index,
                 set_point=item.pfsetp,
-                modus=modus, tol=1e-6
+                control_modus=control_modus, tol=1e-6
             )
         elif item.cosphi_char == 1: #cosphi(P)
             #controlled_node = item.refbar
             #bus = bus_dict[controlled_node]  # controlled node
             bsc = BinarySearchControl(
-                net, ctrl_in_service=stactrl_in_service,
+                net, name=item.loc_name, ctrl_in_service=stactrl_in_service,
                 output_element=gen_element,
                 output_variable="q_mvar",
                 output_element_index=gen_element_index,
@@ -4520,26 +4520,29 @@ def create_stactrl(net, item, **kwargs):
                 input_variable=variable,
                 input_element_index=res_element_index,
                 set_point=item.pfsetp,
-                modus='PF_ctrl_ind',
+                input_inverted=input_inverted,
+                gen_Q_response=gen_Q_response,
+                control_modus='PF_ctrl_ind',
                 bus_idx=None,
                 tol=1e-6
             )
             DroopControl(
                 net,
+                name=item.loc_name,
                 q_droop_mvar=None, #item.Srated * 100 / item.ddroop,
                 pf_overexcited=item.pf_over,
                 pf_underexcited=item.pf_under,
                 vm_set_ub=item.p_over,
                 vm_set_lb=item.p_under,
                 controller_idx=bsc.index,
-                modus='PF_ctrl_P',
+                control_modus ='PF_ctrl_P',
                 #bus_idx=None
             )
         elif item.cosphi_char == 2: #cosphi(U)
             controlled_node = item.refbar
             bus = bus_dict[controlled_node]  # controlled node
             bsc = BinarySearchControl(
-                net, ctrl_in_service=stactrl_in_service,
+                net, name = item.loc_name, ctrl_in_service=stactrl_in_service,
                 output_element=gen_element,
                 output_variable="q_mvar",
                 output_element_index=gen_element_index,
@@ -4551,12 +4554,14 @@ def create_stactrl(net, item, **kwargs):
                 input_variable=variable,
                 input_element_index=res_element_index,
                 set_point=item.pfsetp,
-                modus='PF_ctrl_ind',
+                input_inverted=input_inverted,
+                gen_Q_response=gen_Q_response,
+                control_modus='PF_ctrl_ind',
                 bus_idx=None,
                 tol=1e-6
             )
             DroopControl(
-                net,
+                net, name=item.loc_name,
                 q_droop_mvar=None,  # item.Srated * 100 / item.ddroop,
                 bus_idx=bus,
                 pf_overexcited = item.pf_over,
@@ -4564,7 +4569,7 @@ def create_stactrl(net, item, **kwargs):
                 vm_set_ub=item.u_over,
                 vm_set_lb=item.u_under,
                 controller_idx=bsc.index,
-                modus='PF_ctrl_V',
+                control_modus ='PF_ctrl_V',
                 #bus_idx=None
             )
         else:
@@ -4575,7 +4580,7 @@ def create_stactrl(net, item, **kwargs):
                 return
             raise NotImplementedError(f"{item}: Q orientation '-' not supported")
         BinarySearchControl(
-            net, ctrl_in_service=stactrl_in_service,
+            net, name=item.loc_name, ctrl_in_service=stactrl_in_service,
             output_element=gen_element,
             output_variable="q_mvar",
             output_element_index=gen_element_index,
@@ -4587,7 +4592,9 @@ def create_stactrl(net, item, **kwargs):
             input_variable=variable,
             input_element_index=res_element_index,
             set_point=item.tansetp,
-            modus='tan(phi)_ctrl', tol=1e-6
+            input_inverted=input_inverted,
+            gen_Q_response=gen_Q_response,
+            control_modus='tan(phi)_ctrl', tol=1e-6
         )
     else:
         raise NotImplementedError(f"{item}: control mode {item.i_ctrl=} not implemented")

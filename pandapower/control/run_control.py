@@ -148,23 +148,23 @@ def check_final_convergence(run_count, max_iter, net_converged, net):
                                 read_from_net(net, net.controller.at[k, 'object'].input_element, input_index,
                                               net.controller.at[k, 'object'].input_variable[counter],
                                               net.controller.at[k, 'object'].read_flag[counter]))
-                            if (net.controller.at[k, 'object'].modus == "PF_ctrl" or
-                                    net.controller.at[k, 'object'].modus == 'tan(phi)_ctrl'):
+                            if (net.controller.at[k, 'object'].control_modus == "PF_ctrl" or
+                                    net.controller.at[k, 'object'].control_modus == 'tan(phi)_ctrl'):
                                 p_input_values.append(
                                     read_from_net(net, net.controller.at[k, 'object'].input_element, input_index,
                                                   net.controller.at[k, 'object'].input_variable_p[counter],
                                                   net.controller.at[k, 'object'].read_flag[counter]))
                         counter += 1
-                if net.controller.at[k, 'object'].modus == 'V_ctrl':
+                if net.controller.at[k, 'object'].control_modus == 'V_ctrl':
                     value = read_from_net(net, 'res_bus', np.atleast_1d(net.controller.at[k, 'object'].input_element_index)[0],
                                           'vm_pu', 'single_index')
-                elif net.controller.at[k, 'object'].modus == 'Q_ctrl':
+                elif net.controller.at[k, 'object'].control_modus == 'Q_ctrl':
                     value = sum(np.atleast_1d(input_values))
-                elif net.controller.at[k, 'object'].modus == 'PF_ctrl':
+                elif net.controller.at[k, 'object'].control_modus == 'PF_ctrl':
                     value = np.cos(np.arctan(net.controller.at[k, 'object'].reactance * sum(np.atleast_1d(input_values)) /
                                              len(np.atleast_1d(input_values)) / sum(np.atleast_1d(p_input_values)) / len(
                         np.atleast_1d(p_input_values))))
-                elif net.controller.at[k, 'object'].modus == 'tan(phi)_ctrl':
+                elif net.controller.at[k, 'object'].control_modus == 'tan(phi)_ctrl':
                     value = (sum(np.atleast_1d(input_values)) / len(np.atleast_1d(input_values)) /
                              sum(np.atleast_1d(p_input_values)) / len(np.atleast_1d(p_input_values)))
                 else:
@@ -172,11 +172,11 @@ def check_final_convergence(run_count, max_iter, net_converged, net):
                 difference_txt = f"Set point: {net.controller.at[k, 'object'].set_point} not reached, value is: {value}"
 
             if net.controller.order[i] == -1: #droop controller
-                txt = (f"Controller {net.controller.at[i,'object'].controller_idx} with Droop Controller {i} and modus "
-                       f"{net.controller.at[i, 'object'].modus}: {difference_txt}")
+                txt = (f"Controller {net.controller.at[i,'object'].controller_idx} with Droop Controller {i} and control modus "
+                       f"{net.controller.at[i, 'object'].control_modus}: {difference_txt}")
             elif not (any(np.atleast_1d(getattr(net.controller.at[x, 'object'], 'controller_idx', None)) == i #controller
                                                                                         for x in net.controller.index)):
-                txt = f"Controller {i} with modus {net.controller.at[i, 'object'].modus}: {difference_txt}"
+                txt = f"Controller {i} with control modus {net.controller.at[i, 'object'].control_modus}: {difference_txt}"
             controller_txt = str(controller_txt + txt + "\n")
         logger.error(f"Maximum number of iterations per controller is reached. " 
                                  f"Some controller did not converge after {run_count} calculations!\n{controller_txt}")

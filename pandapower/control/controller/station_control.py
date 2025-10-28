@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 class BinarySearchControl(Controller):
     """
         The Binary search control is a controller which is used to reach a given set point. It can be used for
-        reactive power control, voltage control, cosines(phi) or tangens(phi) control. The control modus can be set via
-        the modus parameter. Input and output elements and indexes can be lists. Input elements can be transformers,
+        reactive power control, voltage control, cosines(phi) or tangens(phi) control. The control control_modus can be set via
+        the control_modus parameter. Input and output elements and indexes can be lists. Input elements can be transformers,
         switches, lines or buses (only in case of voltage control). in case of voltage control, the controlled bus must be
         given to input_element_index. Output elements are sgens, where active and reactive power can
         be set. The output value distribution takes a string and selects the type of reactive power distribution.
@@ -55,13 +55,13 @@ class BinarySearchControl(Controller):
             be 'vm_pu' for 'V_ctrl'.
 
             **input_element_index** - Element of input element in net. Controlled bus in case of Voltage control. Can be
-            given the string 'auto' in modus 'V_ctrl' to automatically select a bus whose nominal voltage is >= X kV.
+            given the string 'auto' in control_modus 'V_ctrl' to automatically select a bus whose nominal voltage is >= X kV.
             The X must be given to 'set_point'. Will take target voltage of the encountered bus. If no bus is found,
             uses the bus next to the controlled generator group. Not completely implemented, generators on multiple buses
             are not correctly handled.
 
             **set_point** - Set point of the controller, can be a reactive power provision or a voltage set point. In
-            case of voltage set point, modus must be V_ctrl, input_element_index must be a bus (input_variable must be
+            case of voltage set point, control_modus must be V_ctrl, input_element_index must be a bus (input_variable must be
             'vm_pu' input_element must be 'res_bus'). Can be overwritten by a droop controller chained with the binary
             search control. If 'V_ctrl' and automated bus selection (input_element_index == 'auto'), set_point will be
             the search criteria in kV for the controlled bus (V_bus >= V_set_point).
@@ -77,7 +77,7 @@ class BinarySearchControl(Controller):
             order as the controlled elements. For 'rel_V_pu': must be a list containing [Target Voltage, minimal allowed
             Voltage, maximal allowed Voltage] for each output element.
 
-            **modus=None** - Enables the selection of the available control modi by taking one of the strings: Q_ctrl, V_ctrl,
+            **control_modus=None** - Enables the selection of the available control modi by taking one of the strings: Q_ctrl, V_ctrl,
             PF_ctrl (PF_ctrl_ind or PF_ctrl_cap for reactance of PF_ctrl) or tan(phi)_ctrl. Formerly called Voltage_ctrl
 
             **tol=0.001** - Tolerance criteria of controller convergence.
@@ -85,7 +85,7 @@ class BinarySearchControl(Controller):
     def __init__(self, net, ctrl_in_service:bool, output_element, output_variable, output_element_index,
                  output_element_in_service, input_element, input_variable,
                  input_element_index, set_point:float, output_values_distribution:str, output_distribution_values = None,
-                 modus:str = None, name = "", input_inverted:list=None, gen_q_response:list=None, tol=0.001, order=0, level=0,
+                 control_modus:str = None, name = "", input_inverted:list=None, gen_q_response:list=None, tol=0.001, order=0, level=0,
                  drop_same_existing_ctrl=False, matching_params=None, **kwargs):
         super().__init__(net, in_service=ctrl_in_service, order=order, level=level,
                          drop_same_existing_ctrl=drop_same_existing_ctrl,
@@ -179,43 +179,43 @@ class BinarySearchControl(Controller):
                     self.v_max_pu = output_distribution_values[:, 2]
             else:
                 self.output_distribution_values = None
-        ###finding correct modus, catching deprecated voltage_ctrl argument###todo unambiguous modus also with droop
-        if modus is None: #catching old attribute voltage_ctrl
+        ###finding correct control_modus, catching deprecated voltage_ctrl argument###todo unambiguous control_modus also with droop
+        if control_modus is None: #catching old attribute voltage_ctrl
             if hasattr(self, 'voltage_ctrl'):
-                modus = self.voltage_ctrl
+                control_modus = self.voltage_ctrl
                 if not hasattr(self, '_deprecation_warned'):#only one message that voltage ctrl is deprecated
                     logger.warning(
                         f"'voltage_ctrl' in Controller {self.index} is deprecated. "
-                        "Use 'modus' ('Q_ctrl', 'V_ctrl', etc.) instead.")
+                        "Use 'control_modus' ('Q_ctrl', 'V_ctrl', etc.) instead.")
                     self._deprecation_warned = True
-        if type(modus) == bool and modus == True: #Only functions written out!?!
-            self.modus = "V_ctrl"
-            logger.warning(f"Deprecated Controller modus for Controller {self.index}, using 'V_ctrl' from available"
+        if type(control_modus) == bool and control_modus == True: #Only functions written out!?!
+            self.control_modus = "V_ctrl"
+            logger.warning(f"Deprecated Controller control_modus for Controller {self.index}, using 'V_ctrl' from available"
                          f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan(phi)_ctrl'\n")
-        elif type(modus) == bool and modus == False: #Only functions written out!?!
-            self.modus = "Q_ctrl"
-            logger.warning(f"Deprecated Controller modus for Controller {self.index}, using Q_ctrl from available"
+        elif type(control_modus) == bool and control_modus == False: #Only functions written out!?!
+            self.control_modus = "Q_ctrl"
+            logger.warning(f"Deprecated Controller control_modus for Controller {self.index}, using Q_ctrl from available"
                          f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan(phi)_ctrl'\n")
-        elif modus == "PF_ctrl_cap": # -1 for capacitive, 1 for inductive systems
-            self.modus = "PF_ctrl"
+        elif control_modus == "PF_ctrl_cap": # -1 for capacitive, 1 for inductive systems
+            self.control_modus = "PF_ctrl"
             self.reactance= -1
-        elif modus == "PF_ctrl_ind":
-            self.modus = "PF_ctrl"
+        elif control_modus == "PF_ctrl_ind":
+            self.control_modus = "PF_ctrl"
             self.reactance = 1
-        elif modus == "PF_ctrl":
+        elif control_modus == "PF_ctrl":
             logger.warning(f"Ambivalent reactive power flow direction for Controller {self.index}, using capacitive direction.\n")
-            self.modus = modus
+            self.control_modus = control_modus
             self.reactance = -1
         else:
-            if modus == "tan(phi)_ctrl" or modus == "V_ctrl":
-                self.modus = modus
+            if control_modus == "tan(phi)_ctrl" or control_modus == "V_ctrl":
+                self.control_modus = control_modus
             else:
-                if modus != 'Q_ctrl':
-                    logger.warning(f"Modus {modus} not recognized, using 'Q_ctrl' from available"
+                if control_modus != 'Q_ctrl':
+                    logger.warning(f"Control_modus {control_modus} not recognized, using 'Q_ctrl' from available"
                              f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan(phi)_ctrl'\n")
-                self.modus = 'Q_ctrl'
+                self.control_modus = 'Q_ctrl'
 
-        if self.modus == 'PF_ctrl': #checking cos(phi) limits
+        if self.control_modus == 'PF_ctrl': #checking cos(phi) limits
             if abs(self.set_point) >1:
                 raise UserWarning(f'Power Factor Controller {self.index}: Set point out of range ([-1,1]')
         ###adding input elements###
@@ -238,7 +238,7 @@ class BinarySearchControl(Controller):
                 read_flag_temp, input_variable_temp = _detect_read_write_flag(net, self.input_element,input_index,
                                                                               input_variable)
             ###get p variables for input elements for Phi controller
-            if self.modus == "PF_ctrl" or self.modus=='tan(phi)_ctrl':
+            if self.control_modus == "PF_ctrl" or self.control_modus== 'tan(phi)_ctrl':
                 if isinstance(input_variable, list):
                     input_variable_p = input_variable[counter].replace('q', 'p').replace('var','w')
                     read_flag_temp_p, input_variable_temp_p = _detect_read_write_flag(net, self.input_element,input_index,
@@ -302,18 +302,18 @@ class BinarySearchControl(Controller):
             self.input_element, self.input_variable, self.output_element, self.output_variable)
 
     def __getattr__(self, name):
-        if name == "modus":
+        if name == "control_modus":
             if not hasattr(self, '_deprecation_warned'):
                 logger.warning(
                     f"'voltage_ctrl' in Controller {self.index} is deprecated. "
-                    "Use 'modus' ('Q_ctrl', 'V_ctrl', etc.) instead."
+                    "Use 'control_modus' ('Q_ctrl', 'V_ctrl', etc.) instead."
                 )
                 self._deprecation_warned = True#only one message that voltage ctrl is deprecated
             return self.voltage_ctrl
         if name == 'bus_idx':
             if not hasattr(self, '_deprecation_warned_bus_idx'):
                 logger.warning(
-                    f"Variable 'bus_idx' in Binary Search Control {self.index} for modus V_ctrl is deprecated. "
+                    f"Variable 'bus_idx' in Binary Search Control {self.index} for control_modus V_ctrl is deprecated. "
                     f"Give index of controlled bus to input_element_index. Input_variable must be 'vm_pu' and"
                     f" input_element 'res_bus'"
                 )
@@ -326,7 +326,7 @@ class BinarySearchControl(Controller):
         ###For V_ctrl, concatenate all gens to a single gen. Redistribution in finalize_control()###
         active_gens = (self.output_element_in_service if isinstance(self.output_element_in_service[0], bool) else
                         np.atleast_1d(self.output_element_in_service)[:, 0].tolist()) #ugly
-        if (self.modus == 'V_ctrl' and self.output_element == 'gen' and
+        if (self.control_modus == 'V_ctrl' and self.output_element == 'gen' and
                         len(np.atleast_1d(self.output_element_index)[active_gens]) >= 2):
             fused_bus_by_switch = False
             fused_bus_index = []
@@ -452,7 +452,7 @@ class BinarySearchControl(Controller):
                 if self.input_element_in_service[counter]: # input element not in service
                     input_values.append(read_from_net(net, self.input_element, input_index,
                                                       self.input_variable[counter], self.read_flag[counter]))
-                    if self.modus == "PF_ctrl" or self.modus == 'tan(phi)_ctrl':
+                    if self.control_modus == "PF_ctrl" or self.control_modus == 'tan(phi)_ctrl':
                         p_input_values.append(read_from_net(net,self.input_element, input_index,
                                                         self.input_variable_p[counter], self.read_flag[counter]))
                 counter += 1
@@ -484,20 +484,20 @@ class BinarySearchControl(Controller):
 
         # read previously set values
         # compare old and new set values
-        if self.modus == "Q_ctrl" or (self.modus=='V_ctrl' and self.input_element_index is None):
-            if self.modus == 'V_ctrl':
+        if self.control_modus == "Q_ctrl" or (self.control_modus == 'V_ctrl' and self.input_element_index is None):
+            if self.control_modus == 'V_ctrl':
                 logger.warning('Missing attribute self.input_element_index, defaulting to Q_ctrl\n')
-                self.modus = 'Q_ctrl'
+                self.control_modus = 'Q_ctrl'
             self.diff_old = self.diff
             self.diff = self.set_point - sum(input_values)
             self.converged = np.all(np.abs(self.diff) < self.tol)
 
-        elif str(self.modus).startswith("PF_ctrl"):#capacitive => reactance = -1, inductive => reactance = 1
-            if self.modus == 'PF_ctrl_ind':
-                self.modus = 'PF_ctrl'
+        elif str(self.control_modus).startswith("PF_ctrl"):#capacitive => reactance = -1, inductive => reactance = 1
+            if self.control_modus == 'PF_ctrl_ind':
+                self.control_modus = 'PF_ctrl'
                 self.reactance = 1
-            elif self.modus == 'PF_ctrl_cap':
-                self.modus = 'PF_ctrl'
+            elif self.control_modus == 'PF_ctrl_cap':
+                self.control_modus = 'PF_ctrl'
                 self.reactance = -1
 
             self.diff_old = self.diff
@@ -505,28 +505,28 @@ class BinarySearchControl(Controller):
             self.diff = q_set - sum(input_values)/len(input_values)
             self.converged = np.all(np.abs(self.diff)<self.tol)
 
-        elif self.modus == "tan(phi)_ctrl":
+        elif self.control_modus == "tan(phi)_ctrl":
             self.diff_old = self.diff
             q_set = sum(p_input_values)/len(p_input_values) * self.set_point
             self.diff = q_set - sum(input_values)/len(input_values)
             self.converged = np.all(np.abs(self.diff) < self.tol)
         else:
             ###catching deprecated modi from old imports
-            if type(self.modus) == bool and self.modus == True and self.input_element_index is not None:
-                self.modus = "V_ctrl"  # catching old implementation
+            if type(self.control_modus) == bool and self.control_modus == True and self.input_element_index is not None:
+                self.control_modus = "V_ctrl"  # catching old implementation
                 logger.warning(
                     f"Deprecated Control Modus in Controller {self.index}, using V_ctrl from available types\n")
-            elif (type(self.modus) == bool and self.modus == False) or (type(self.modus) == bool and self.modus == True
-                and self.input_element_index is None):
-                if self.modus is True:
+            elif (type(self.control_modus) == bool and self.control_modus == False) or (type(self.control_modus) == bool and self.control_modus == True
+                                                                                        and self.input_element_index is None):
+                if self.control_modus is True:
                     logger.warning(f'Deprecated Control Modus in Controller {self.index}, attempted to use "V_ctrl" but '
                                    f'missing attribute input_element_index, defaulting to Q_ctrl\n')
                 else:
                     logger.warning(
                         f"Deprecated Control Modus in Controller {self.index}, using Q_ctrl from available types\n")
-                self.modus = "Q_ctrl"
+                self.control_modus = "Q_ctrl"
 
-            if self.modus == "V_ctrl":
+            if self.control_modus == "V_ctrl":
                 if self.input_element != 'res_bus' and not any(getattr(net.controller.at[x, 'object'], 'controller_idx', False) ==
                                                                         self.index for x in net.controller.index):
                     logger.warning(f"'input_element' must be 'res_bus' for V_ctrl not {self.input_element}, correcting.")
@@ -539,10 +539,10 @@ class BinarySearchControl(Controller):
                 self.diff = self.set_point - net.res_bus.vm_pu.at[np.atleast_1d(self.input_element_index)[0]]
                 self.converged = np.all(np.abs(self.diff) < self.tol)
             else:
-                if self.modus != 'Q_ctrl':
+                if self.control_modus != 'Q_ctrl':
                     logger.warning(f"No Controller Modus specified for Controller {self.index}, using Q_ctrl.\n"
-                      "Please specify 'modus' ('Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan(phi)_ctrl')\n")
-                    self.modus = 'Q_ctrl'
+                      "Please specify 'control_modus' ('Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan(phi)_ctrl')\n")
+                    self.control_modus = 'Q_ctrl'
                 self.diff_old = self.diff #Q_ctrl
                 self.diff = self.set_point - sum(input_values)
                 self.converged = np.all(np.abs(self.diff) < self.tol)
@@ -987,7 +987,7 @@ class DroopControl(Controller):
 
                 **in_service = True** - Whether the droop controller is in service or not.
 
-                **modus** - takes string: Q_ctrl, V_ctrl or PF_ctrl. Select droop variety of PF_ctrl by
+                **control_modus** - takes string: Q_ctrl, V_ctrl or PF_ctrl. Select droop variety of PF_ctrl by
                 choosing 'PF_ctrl_P' for P-Characteristic or 'PF_ctrl_V' for V-Characteristic. PF_ctrl_P takes the active
                 power at the input_element as reference, for PF_ctrl_V the reference voltage must be defined via the
                 bus_idx. Formerly called voltage_ctrl.
@@ -1018,7 +1018,7 @@ class DroopControl(Controller):
 
                 **tol = 1e-6** - Tolerance criteria of controller convergence.
            """
-    def __init__(self, net, controller_idx:int = None, in_service:bool=True, modus:str = None, q_droop_mvar = None,
+    def __init__(self, net, controller_idx:int = None, in_service:bool=True, control_modus:str = None, q_droop_mvar = None,
                  bus_idx=None, vm_set_lb=None, vm_set_ub=None, pf_overexcited=None, pf_underexcited=None,
                  input_element_q_meas:str = None, input_variable_q_meas = None, input_element_index_q_meas = None, tol=1e-6,
                  order=-1, level=0, name = "", drop_same_existing_ctrl=False, matching_params=None, **kwargs):
@@ -1034,9 +1034,9 @@ class DroopControl(Controller):
         self.input_variable_q_meas = input_variable_q_meas
         self.input_element_index_q_meas = input_element_index_q_meas
         self.bus_idx = bus_idx
+        self.controller_idx = controller_idx
         self.vm_pu = None
         self.vm_pu_old = self.vm_pu
-        self.controller_idx = controller_idx
         self.vm_set_pu = net.controller.at[self.controller_idx, "object"].set_point
         self.vm_set_pu_new = None #todo where to get vm_set_pu
         self.lb_voltage = vm_set_lb
@@ -1051,51 +1051,51 @@ class DroopControl(Controller):
         self.converged = False
         self.pf_over = pf_overexcited
         self.pf_under = pf_underexcited
-        self.p_cosphi = None #selection of droop modus for pf_ctrl
-        ###catch modus and deprecated attribute voltage_ctrl
-        if modus is None:#catching old attribute voltage_ctrl
+        self.p_cosphi = None #selection of droop control_modus for pf_ctrl
+        ###catch control_modus and deprecated attribute voltage_ctrl
+        if control_modus is None:#catching old attribute voltage_ctrl
             if hasattr(self, 'voltage_ctrl'):
-                modus = self.voltage_ctrl
+                control_modus = self.voltage_ctrl
                 if not hasattr(self, '_deprecation_warned'):#only one message that voltage ctrl is deprecated
                     logger.warning(
                         f"'voltage_ctrl' in Controller {self.index} is deprecated. "
-                        "Use 'modus' ('Q_ctrl', 'V_ctrl', etc.) instead.")
+                        "Use 'control_modus' ('Q_ctrl', 'V_ctrl', etc.) instead.")
                     self._deprecation_warned = True
         ###atching old implementation
-        if type(modus) == bool and modus == True:
-            modus = "V_ctrl"
+        if type(control_modus) == bool and control_modus == True:
+            control_modus = "V_ctrl"
             logger.warning(f"Deprecated Control Modus in Controller {self.index}, using V_ctrl from available types"
                          f" 'Q_ctrl', 'V_ctrl' or 'PF_ctrl'\n")
-        elif type(modus) == bool and modus == False:
-            modus = "Q_ctrl"
+        elif type(control_modus) == bool and control_modus == False:
+            control_modus = "Q_ctrl"
             logger.warning(f"Deprecated Control Modus in Controller {self.index}, using Q_ctrl from available types"
                          f" 'Q_ctrl', 'V_ctrl' or 'PF_ctrl'\n")
 
-        if modus == "PF_ctrl_cap" or modus == "PF_ctrl_ind" or modus == 'PF_ctrl' or modus == 'PF_ctrl_P':#PF(P) control
-            if modus != 'PF_ctrl_P':
-                logger.warning(f"Power Factor Droop Control in Controller {self.index}: Modus is ambivalent, using"
+        if control_modus == "PF_ctrl_cap" or control_modus == "PF_ctrl_ind" or control_modus == 'PF_ctrl' or control_modus == 'PF_ctrl_P':#PF(P) control
+            if control_modus != 'PF_ctrl_P':
+                logger.warning(f"Power Factor Droop Control in Controller {self.index}: Control modus is ambivalent, using"
                                f" 'PF_ctrl_P' from available modi: 'PF_ctrl_P' and 'PF_ctrl_V'\n")
-            self.modus = 'PF_ctrl'
+            self.control_modus = 'PF_ctrl'
             self.p_cosphi = True
-        elif modus == 'PF_ctrl_V':#PF(V) control
-            self.modus = 'PF_ctrl'
+        elif control_modus == 'PF_ctrl_V':#PF(V) control
+            self.control_modus = 'PF_ctrl'
             self.p_cosphi = False
         else:
-            if modus == 'Q_ctrl' or modus == "V_ctrl":
-                if self.vm_set_pu is None and modus == 'V_ctrl': #catching missing voltage set point
+            if control_modus == 'Q_ctrl' or control_modus == "V_ctrl":
+                if self.vm_set_pu is None and control_modus == 'V_ctrl': #catching missing voltage set point
                     raise UserWarning(f'vm_set_pu must be a number, not {type(self.vm_set_pu)} in Controller {self.index}')
-                self.modus = modus
+                self.control_modus = control_modus
             else:
-                raise UserWarning(f'Droop Control Modus {modus} not decipherable in Controller {self.index}')
-        #checking if Droop and BS Controller have the same modus
-        if self.modus != net.controller.at[self.controller_idx, 'object'].modus:
-            if (self.modus != 'PF_ctrl_P' and self.modus != 'PF_ctrl_V' and #droop included in modus string
-                net.controller.at[self.controller_idx, 'object'].modus != True and self.modus != True):#conversion in progress
+                raise UserWarning(f'Droop Control Modus {control_modus} not decipherable in Controller {self.index}')
+        #checking if Droop and BS Controller have the same control_modus
+        if self.control_modus != net.controller.at[self.controller_idx, 'object'].control_modus:
+            if (self.control_modus != 'PF_ctrl_P' and self.control_modus != 'PF_ctrl_V' and #droop included in control_modus string
+                net.controller.at[self.controller_idx, 'object'].control_modus != True and self.control_modus != True):#conversion in progress
                 logger.warning(f"Discrepancy between BinarySearchController Modus and Droop Controller Modus in {self.index}."
-                               f"Using Droop Modus {net.controller.at[self.controller_idx, 'object'].modus}")
-                self.modus = net.controller.at[self.controller_idx, 'object'].modus
+                               f"Using Droop Controller Modus {net.controller.at[self.controller_idx, 'object'].control_modus}")
+                self.control_modus = net.controller.at[self.controller_idx, 'object'].control_modus
         ###checking for values
-        if self.modus == 'PF_ctrl': #catching missing values
+        if self.control_modus == 'PF_ctrl': #catching missing values
             if self.lb_voltage is None or self.ub_voltage is None:
                 raise UserWarning(f'Input error, vm_set_lb and vm_set_ub must be a number in Controller {self.index}')
             if self.lb_voltage < 0 or self.ub_voltage < 0:
@@ -1122,11 +1122,11 @@ class DroopControl(Controller):
 
 
     def __getattr__(self, name):
-        if name == "modus":
+        if name == "control_modus":
             if not hasattr(self, '_deprecation_warned'):
                 logger.warning(
                     f"'voltage_ctrl' in Controller {self.index} is deprecated. "
-                    "Use 'modus' ('Q_ctrl', 'V_ctrl', etc.) instead."
+                    "Use 'control_modus' ('Q_ctrl', 'V_ctrl', etc.) instead."
                 )
                 self._deprecation_warned = True  # only one message that voltage ctrl is deprecated
             return self.voltage_ctrl
@@ -1138,25 +1138,25 @@ class DroopControl(Controller):
                 net.controller.at[self.controller_idx, "object"].converged):
             self.converged = True
             return self.converged
-        if self.modus != net.controller.at[self.controller_idx, 'object'].modus:#checking if droop and bsc have the same modus
-            if (self.modus != 'PF_ctrl_P' and self.modus != 'PF_ctrl_V' and #here the droop is included in the string
-                (net.controller.at[self.controller_idx, 'object'].modus != True and self.modus != True)):#converting in process
+        if self.control_modus != net.controller.at[self.controller_idx, 'object'].control_modus:#checking if droop and bsc have the same control_modus
+            if (self.control_modus != 'PF_ctrl_P' and self.control_modus != 'PF_ctrl_V' and #here the droop is included in the string
+                (net.controller.at[self.controller_idx, 'object'].control_modus != True and self.control_modus != True)):#converting in process
                 logger.warning(f"Discrepancy between BinarySearchController Modus and Droop Controller Modus in {self.index}."
-                               f"Using Droop Modus {net.controller.at[self.controller_idx, 'object'].modus}")
-                self.modus = net.controller.at[self.controller_idx, 'object'].modus
-        if type(self.modus) == bool and self.modus == True:#catching deprecated modi in old imports
-            self.modus = "V_ctrl"  # catching old implementation
+                               f"Using Droop Controller Modus {net.controller.at[self.controller_idx, 'object'].control_modus}")
+                self.control_modus = net.controller.at[self.controller_idx, 'object'].control_modus
+        if type(self.control_modus) == bool and self.control_modus == True:#catching deprecated modi in old imports
+            self.control_modus = "V_ctrl"  # catching old implementation
             logger.warning(f"Deprecated Control Modus in Controller {self.index}, using V_ctrl from available types\n")
-        elif type(self.modus) == bool and self.modus == False:
-            self.modus = "Q_ctrl"
+        elif type(self.control_modus) == bool and self.control_modus == False:
+            self.control_modus = "Q_ctrl"
             logger.warning(f"Deprecated Control Modus in Controller {self.index}, using Q_ctrl from available types\n")
 
-        if self.modus == 'V_ctrl': #voltage droop
+        if self.control_modus == 'V_ctrl': #voltage droop
             ###backwards compatibility
             if (hasattr(self, 'bus_idx') and net.controller.at[
                 self.controller_idx, 'object'].input_element != "res_bus" and
                     self.bus_idx is not None):
-                logger.warning(f"Attribute 'bus_idx' in Droop controller {self.index} is deprecated for modus V_ctrl,"
+                logger.warning(f"Attribute 'bus_idx' in Droop controller {self.index} is deprecated for control_modus V_ctrl,"
                                f"please select the bus via the 'input_element_index' attribute of the linked binary search"
                                f"controller {self.controller_idx}. Attempting to use bus index {self.bus_idx}.")
                 self.input_element_q_meas = net.controller.at[self.controller_idx, 'object'].input_element
@@ -1167,9 +1167,9 @@ class DroopControl(Controller):
                 net.controller.at[self.controller_idx, 'object'].input_variable = "vm_pu"
                 self.bus_idx = None
             if hasattr(self, 'bus_idx') and self.bus_idx is not None: #Q_ctrl
-                logger.warning(f"Specified 'bus_idx' in Controller {self.index} for modus 'V_ctrl', defaulting to "
+                logger.warning(f"Specified 'bus_idx' in Controller {self.index} for control_modus 'V_ctrl', defaulting to "
                                f"Q_ctrl\n")
-                self.modus = 'Q_ctrl'
+                self.control_modus = 'Q_ctrl'
                 counter = 0
                 input_values = []  # getting Q values
                 for input_index in net.controller.at[self.controller_idx, "object"].input_element_index:
@@ -1183,7 +1183,7 @@ class DroopControl(Controller):
                 self.diff = (net.controller.at[self.controller_idx, "object"].set_point -
                     read_from_net(net, "res_bus", np.atleast_1d(
                     net.controller.at[self.controller_idx,'object'].input_element_index)[0], "vm_pu", 'auto'))
-        elif str(self.modus).startswith('PF_ctrl'):
+        elif str(self.control_modus).startswith('PF_ctrl'):
             if self.q_set_old_mvar is not None and self.q_set_mvar:
                 self.diff = self.q_set_mvar - self.q_set_old_mvar
             else:
@@ -1204,11 +1204,11 @@ class DroopControl(Controller):
                     np.tan(np.arccos(net.controller.at[self.controller_idx, "object"].set_point)))#calculating set point from linked controller
                 self.diff = q_set - sum(input_values)/len(input_values)
 
-        elif self.modus == 'tan(phi)_ctrl':
+        elif self.control_modus == 'tan(phi)_ctrl':
             raise UserWarning(f'No droop option for tan(phi) controller {self.index}')
         else:
-            if self.modus != 'Q_ctrl':
-                logger.warning(f'No specified modus in droop controller {self.index}, using Q_ctrl\n')
+            if self.control_modus != 'Q_ctrl':
+                logger.warning(f'No specified control_modus in droop controller {self.index}, using Q_ctrl\n')
             counter = 0
             input_values = [] #getting Q values
             for input_index in net.controller.at[self.controller_idx, "object"].input_element_index:
@@ -1222,7 +1222,7 @@ class DroopControl(Controller):
         #if net.controller.at[self.controller_idx, "object"].input_element == "res_switch":
         #    self.tol = 0.2
 
-        if self.modus != 'V_ctrl' and self.modus != 'PF_ctrl': #Convergence
+        if self.control_modus != 'V_ctrl' and self.control_modus != 'PF_ctrl': #Convergence
             self.converged = np.all(np.abs(self.diff) < self.tol)
         else: #Convergence for voltage control and PF_ctrl
             if np.all(np.abs(self.diff) < self.tol):
@@ -1236,17 +1236,17 @@ class DroopControl(Controller):
 
     def _droop_control_step(self, net):
         ###calculating new set point###
-        if type(self.modus) == bool and self.modus == True:
-            self.modus = "V_ctrl" #catching old implementation when importing from json
-        elif type(self.modus) == bool and self.modus == False:
-            self.modus = "Q_ctrl"
-        if self.modus != 'V_ctrl' and not getattr(self, 'p_cosphi', False): #getting voltage
+        if type(self.control_modus) == bool and self.control_modus == True:
+            self.control_modus = "V_ctrl" #catching old implementation when importing from json
+        elif type(self.control_modus) == bool and self.control_modus == False:
+            self.control_modus = "Q_ctrl"
+        if self.control_modus != 'V_ctrl' and not getattr(self, 'p_cosphi', False): #getting voltage
             self.vm_pu = read_from_net(net, "res_bus", self.bus_idx, "vm_pu", self.read_flag)
-        elif self.modus == 'V_ctrl':
+        elif self.control_modus == 'V_ctrl':
             self.vm_pu = net.controller.at[self.controller_idx,'object'].set_point
         self.vm_pu_old = self.vm_pu
 
-        if self.modus=='Q_ctrl':
+        if self.control_modus== 'Q_ctrl':
             if self.q_set_mvar_bsc is None:
                 self.q_set_mvar_bsc = net.controller.at[self.controller_idx, "object"].set_point
             if self.lb_voltage is not None and self.ub_voltage is not None:
@@ -1259,7 +1259,7 @@ class DroopControl(Controller):
                 else:
                     self.q_set_old_mvar, self.q_set_mvar = (self.q_set_mvar, self.q_set_mvar_bsc)
 
-        elif self.modus == 'PF_ctrl':
+        elif self.control_modus == 'PF_ctrl':
             counter = 0
             input_values = []
             p_input_values = [] #P_values if p_cosphi, V_values if not
@@ -1323,9 +1323,9 @@ class DroopControl(Controller):
             self.q_set_old_mvar, self.q_set_mvar = self.q_set_mvar, pf_cosphi
 
         else: #V_ctrl and wrong strings
-            if self.modus != "V_ctrl":
+            if self.control_modus != "V_ctrl":
                 logger.error(f"No Droop Controller Modus specified for Controller {self.index}, using V_ctrl.\n"
-                             "Please specify 'modus' ('Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan(phi)_ctrl')\n")
+                             "Please specify 'control_modus' ('Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan(phi)_ctrl')\n")
             if self.q_set_mvar is not None:
                 self.q_set_old_mvar, self.q_set_mvar = (
                 self.q_set_mvar, self.q_set_mvar - (self.vm_set_pu - self.vm_pu) * self.q_droop_mvar)
