@@ -132,8 +132,7 @@ def check_final_convergence(run_count, max_iter, net_converged, net):
         txt = ""
         difference_txt = ""
         for i in not_converged_idx:
-            if not (any(np.atleast_1d(getattr(net.controller.at[x, 'object'], 'controller_idx', None)) == i  # controller
-                for x in net.controller.index)):#to not doubly calculate linked controllers
+            if not net.controller['object'].apply(lambda obj: getattr(obj, 'controller_idx', None) == i).any():#to not doubly calculate linked controllers
                 input_values = []  # reactive power q
                 p_input_values = []  # active power p for power factor controllers
                 counter = 0
