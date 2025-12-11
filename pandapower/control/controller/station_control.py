@@ -299,7 +299,7 @@ class BinarySearchControl(Controller):
             self.min_q_mvar.append(min(min_q, max_q))
 
         # normalize the values distribution: todo differentiate
-        self._normalize_distribution_in_service(initial_pf_distribution=output_values_distribution)
+        self._normalize_distribution_in_service(initial_pf_distribution=output_distribution_values)
 
         self._update_min_max_q_mvar(net)
 
@@ -334,7 +334,9 @@ class BinarySearchControl(Controller):
             self.input_element, self.input_variable, self.output_element, self.output_variable)
 
     def __getattr__(self, name):
-        if name == "control_modus":
+        if name == "control_modus" and hasattr(self, 'modus'): #legacy
+            return self.modus
+        if name == "control_modus" and hasattr(self, 'voltage_ctrl'):
             if not hasattr(self, '_deprecation_warned'):
                 logger.warning(
                     f"'voltage_ctrl' in Controller {self.index} is deprecated. "
@@ -356,8 +358,10 @@ class BinarySearchControl(Controller):
 
     def initialize_control(self, net, converged = False):
         ###For V_ctrl, concatenate all gens to a single gen. Redistribution in finalize_control()###
-        active_gens = (self.output_element_in_service if isinstance(self.output_element_in_service[0], bool) else
-                        np.atleast_1d(self.output_element_in_service)[:, 0].tolist()) #ugly
+        active_gens = np.array(self.output_element_in_service, dtype=bool).tolist() if (not self.output_element_in_service
+                    or isinstance(self.output_element_in_service[0], (bool, np.bool_))) \
+                    else np.atleast_1d(self.output_element_in_service)[:, 0].tolist()
+
         if (self.control_modus == 'V_ctrl' and self.output_element == 'gen' and
                         len(np.atleast_1d(self.output_element_index)[active_gens]) >= 2):
             fused_bus_by_switch = False
@@ -417,10 +421,15 @@ class BinarySearchControl(Controller):
         self.output_values = read_from_net(net, self.output_element, output_element_index, self.output_variable,
                                             self.write_flag)
         self.output_values_old = None
-
-        self.output_adjustable = np.array([False if not distribution else service
-                                           for distribution, service in zip(self.output_values_distribution,
-                                                                            self.output_element_in_service)],
+        if self.output_values_distribution == 'rel_V_pu':
+            self.output_adjustable = np.array([False if not distribution else service
+                                for distribution, service in zip(np.atleast_1d(np.atleast_2d(
+                                self.output_distribution_values)[0][0]), np.atleast_1d(self.output_element_in_service))],
+                                dtype=np.bool)
+        else: #rel_V_pu has arrays as output_distribution_values
+            self.output_adjustable = np.array([False if not distribution else service
+                                           for distribution, service in zip(np.atleast_1d(self.output_distribution_values),
+                                                   np.atleast_1d(self.output_element_in_service))],
                                           dtype=np.bool)
 
     def is_converged(self, net):
@@ -669,9 +678,9 @@ class BinarySearchControl(Controller):
                     self.output_distribution_values = self.output_distribution_values = np.tile(equal_array,
                                                             (len(np.array(self.output_element_in_service)), 1))[0]
                     output_distribution_values = np.array(self.output_distribution_values)  # forming limit arrays
-                    self.v_set_point_pu = output_distribution_values[:, 0]
-                    self.v_min_pu = output_distribution_values[:, 1]
-                    self.v_max_pu = output_distribution_values[:, 2]
+                    self.v_set_point_pu = np.atleast_2d(output_distribution_values)[:, 0]
+                    self.v_min_pu = np.atleast_2d(output_distribution_values)[:, 1]
+                    self.v_max_pu = np.atleast_2d(output_distribution_values)[:, 2]
                 output_distribution_values_in_service = None
             else: output_distribution_values_in_service, self.output_distribution_values = None, None
         elif getattr(self, 'output_distribution_values', None) is None:
@@ -902,7 +911,7 @@ class BinarySearchControl(Controller):
                                 np.atleast_1d(self.output_element_in_service))):  # catching wrong distributions
                         equal = 1 / sum(self.output_element_in_service)
                         distribution = np.full(np.sum(np.array(self.output_element_in_service)), equal)
-                    x = x * distribution if isinstance(x, numbers.Number) else sum(x) * distribution #add distribution to Q values
+            x = x * distribution if isinstance(x, numbers.Number) else sum(x) * distribution #add distribution to Q values
             ###enforce hard Q limits###
             if not all(self.output_adjustable) and net._options['enforce_q_lims']:
                 positions_adjustable = [i for i, val in enumerate(self.output_adjustable) if
@@ -921,7 +930,7 @@ class BinarySearchControl(Controller):
                         x[i] = 0  # reset value to 0 because station is out of service
 
             else:
-                x = sum(x) * self.output_values_distribution
+                x = sum(x) * distribution
 
             if self.output_adjustable is not None and net._options[
                 'enforce_q_lims']:  # none if output element is a shunt
@@ -998,9 +1007,9 @@ class BinarySearchControl(Controller):
                             x = self.output_min_q_mvar
                         elif reached_max_qmvar:
                             x = self.output_max_q_mvar
-        x = np.sign(x) * (np.where(abs(abs(x) - abs(self.output_values)) > 84, 84,
+            x = np.sign(x) * (np.where(abs(abs(x) - abs(self.output_values)) > 84, 84,
                                    abs(x)))  # catching distributions out of bounds, 84 seems to be the maximum
-        self.output_values_old, self.output_values = self.output_values, x
+            self.output_values_old, self.output_values = self.output_values, x
         ### write new set of Q values to output elements###
         output_element_index = (list(np.atleast_1d(self.output_element_index)[self.output_element_in_service])[0] if self.write_flag
             == 'single_index' else list(np.array(self.output_element_index)[self.output_element_in_service])) #ruggedizing code
@@ -1048,19 +1057,21 @@ class BinarySearchControl(Controller):
     def _normalize_distribution_in_service(self, initial_pf_distribution=None):
         # normalize distribution depending on in service of stations
         if initial_pf_distribution is None:
-            distribution = self.output_values_distribution
+            if type(self.output_distribution_values) == str or getattr(self, 'output_distribution_values', None) is None:
+                distribution = np.ones(len(self.output_element_in_service))/len(self.output_element_in_service)
+            else: distribution = self.output_distribution_values
         else:
             distribution = initial_pf_distribution
 
         # normalize the values distribution
         # set output_values_distribution to 0, if station is not in service
-        self.output_values_distribution = [0 if not in_service else value
-                                           for in_service, value in zip(self.output_element_in_service, distribution)]
-        total = np.sum(self.output_values_distribution)
-        if total > 0:  # To avoid division by zero
-            self.output_values_distribution = np.array(self.output_values_distribution, dtype=np.float64) / total
+        self.output_distribution_values = [0 if not in_service else value
+                       for in_service, value in zip(np.atleast_1d(self.output_element_in_service), np.atleast_1d(distribution))]
+        total = np.sum(self.output_distribution_values)
+        if total is not None and total > 0:  # To avoid division by zero
+            self.output_distribution_values = np.array(self.output_distribution_values, dtype=np.float64) / total
         else:
-            self.output_values_distribution = np.zeros_like(self.output_values_distribution, dtype=np.float64)
+            self.output_distribution_values = np.zeros_like(self.output_distribution_values, dtype=np.float64)
 
     def _update_min_max_q_mvar(self, net):
         if 'min_q_mvar' in net[self.output_element].columns:
@@ -1302,7 +1313,9 @@ class DroopControl(Controller):
 
 
     def __getattr__(self, name):
-        if name == "control_modus":
+        if name == "control_modus" and hasattr(self, 'modus'): #legacy
+            return self.modus
+        if name == "control_modus" and hasattr(self, 'voltage_ctrl'):
             if not hasattr(self, '_deprecation_warned'):
                 logger.warning(
                     f"'voltage_ctrl' in Controller {self.index} is deprecated. "
@@ -1411,7 +1424,7 @@ class DroopControl(Controller):
             self.converged = np.all(np.abs(self.diff) < self.tol)
         else: #Convergence for voltage control and PF_ctrl
             if np.all(np.abs(self.diff) < self.tol):
-                self.converged = net.controller.at[self.controller_idx, "object"].converged
+                self.converged = True
         return self.converged
 
     def control_step(self, net):
@@ -1536,7 +1549,8 @@ class DroopControl(Controller):
                 counter = 0
                 for input_index in np.atleast_1d(input_element_index):
                     input_values.append(read_from_net(net, input_element, input_index, str(input_variable[counter]), read_flag[counter]))
-            self.vm_set_pu_new = self.vm_set_pu + sum(input_values) / self.q_droop_mvar #only sum, not divided by elements
+            self.vm_set_pu_new = (getattr(self, 'vm_set_pu', net.controller.object[self.controller_idx].set_point)
+                                  + sum(input_values) / self.q_droop_mvar) #only sum, not divided by elements
             net.controller.at[self.controller_idx, "object"].set_point = self.vm_set_pu_new
 
 
