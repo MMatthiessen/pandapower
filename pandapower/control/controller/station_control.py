@@ -505,7 +505,7 @@ class BinarySearchControl(Controller):
                         p_input_values.append(read_from_net(net,self.input_element, input_index,
                                                         self.input_variable_p[counter], self.read_flag[counter]))
                 counter += 1
-        input_values = (self.input_sign * np.asarray(input_values)).tolist()
+            input_values = (self.input_sign * np.asarray(input_values)).tolist()
         if self.control_modus == "PF_ctrl" or self.control_modus == 'tan(phi)_ctrl':
             p_input_values = (self.input_sign * np.asarray(p_input_values)).tolist()
         ###reading Q limits in case of skipped initialization###

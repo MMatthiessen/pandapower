@@ -112,7 +112,6 @@ def test_qctrl_Imp_Input():
     runpp(net, run_control=True)
     assert (abs(net.res_impedance.loc[0, "q_to_mvar"] - 1.0) < tol)
 
-
 def test_qctrl_droop():
     net = simple_test_net()
     tol = 1e-6
@@ -120,7 +119,7 @@ def test_qctrl_droop():
     bsc = BinarySearchControl(net, name="BSC1", ctrl_in_service=True,
                                          output_element="sgen", output_variable="q_mvar", output_element_index=[0],
                                          output_element_in_service=[True], output_values_distribution='set_Q',
-                                         input_element="res_line", damping_factor=0.9, input_variable=["q_to_mvar"],
+                                         input_element="res_line", damping_factor=0.9, input_variable=["q_from_mvar"],
                                          input_inverted=True, input_element_index=0, set_point=1, voltage_ctrl=False, tol=1e-6)
     DroopControl(net, name="DC1", q_droop_mvar=40, bus_idx=1,
                             vm_set_pu=1, vm_set_ub=1.005, vm_set_lb=0.995,
