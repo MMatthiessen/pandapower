@@ -201,7 +201,7 @@ class BinarySearchControl(Controller):
                     self.v_max_pu = output_distribution_values[:, 2]
             else:
                 self.output_distribution_values = None
-        ###finding correct control_modus, catching deprecated voltage_ctrl argument###todo unambiguous control_modus also with droop
+        ###finding correct control_modus, catching deprecated voltage_ctrl argument###
         if control_modus is None: #catching old attribute voltage_ctrl
             if hasattr(self, 'voltage_ctrl'):
                 control_modus = self.voltage_ctrl
