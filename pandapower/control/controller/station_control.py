@@ -11,6 +11,8 @@ from pandas import concat
 
 from pandapower.control.basic_controller import Controller
 from pandapower.auxiliary import _detect_read_write_flag, read_from_net, write_to_net
+from pandapower.control.util.auxiliary import get_min_max_q_mvar_from_characteristics_object
+import logging
 import pandapower.topology as top
 import networkx as nx
 
@@ -25,82 +27,83 @@ class BinarySearchControl(Controller):
         given to input_element_index. Output elements are sgens, where active and reactive power can
         be set. The output value distribution takes a string and selects the type of reactive power distribution.
         The output distribution value describes the distribution of reactive power provision between multiple
-        output_elements and will be normalized to 100 %.
+        output_elements and will be normalized to 100 % (1).
 
-        INPUT:
-            **self**
+        Parameter:
+        ----------
+            self : BinarySearchControl
 
-            **net** - A pandapower grid
-
-            **ctrl_in_service** - Whether the controller is in service or not.
-
-            **output_element** - Output element of the controller. Takes a string value "gen" or "sgen", with
-            reactive power control, currently only "sgen" is possible.
-
-            **output_variable** - Output variable of that element, normally "q_mvar".
-
-            **output_element_index** - Index or list of indices of the output element(s) in net (e.g. "net.sgen").
-
-            **output_element_in_service** - List indicating whether each output element is in service.
-
-            **input_element** - Measurement location, can be a transformer, switches or lines. Must be a bus for
-            V_ctrl. Indicated by string value "res_trafo", "res_switch", "res_line" or "res_bus". In case of
-            "res_switch", an additional small impedance is introduced in the switch.
-
-            **input_variable** - Variable which is used to take the measurement from. Indicated by string value. Must
-            be 'vm_pu' for 'V_ctrl'.
-
-            **input_element_index** - Element of input element in net. Controlled bus in case of Voltage control. Can be
-            given the string 'auto' in control_modus 'V_ctrl' to automatically select a bus whose nominal voltage is >= X kV.
-            The X must be given to 'set_point'. Will take target voltage of the encountered bus. If no bus is found,
-            uses the bus next to the controlled generator group. Not completely implemented, generators on multiple buses
-            are not correctly handled.
-
-            **input_inverted** - List of Booleans that indicates if the measurement of the input elements must be inverted. Required
-            when importing from PowerFactory.
-
-            **set_point** - Set point of the controller, can be a reactive power provision or a voltage set point. In
-            case of voltage set point, control_modus must be V_ctrl, input_element_index must be a bus (input_variable must be
-            'vm_pu' input_element must be 'res_bus'). Can be overwritten by a droop controller chained with the binary
-            search control. If 'V_ctrl' and automated bus selection (input_element_index == 'auto'), set_point will be
-            the search criteria in kV for the controlled bus (V_bus >= V_set_point).
-
-            **output_values_distribution** - Takes string to select one of the different available reactive power distribution
-            methods: 'rel_P' -Q is relative to used Power, 'rel_rated_S' -Q is relative to the rated power S, currently
-            using the sgen attribute 'sn_mva', 'set_Q' -set individual reactive power for each output element,
-            'max_Q' -maximized reactive power reserve for the output elements, 'rel_V_pu' -Q is relative to the voltage
-            limits of the output element.
-
-            **output_distribution_values=None** -The values of the Q distribution, only applicable if q_distribution = 'set_Q'
-            or rel_V_pu. For 'set_Q': Must be list containing the Q Value of each controlled element in percent in the same
-            order as the controlled elements. For 'rel_V_pu': must be a list containing [Target Voltage, minimal allowed
-            Voltage, maximal allowed Voltage] for each output element.
-
-            **output_min_q_mvar** - Minimum reactive power limits for each output element.
-
-            **output_max_q_mvar** - Maximum reactive power limits for each output element.
-
-            **control_modus=None** - Enables the selection of the available control modi by taking one of the strings: Q_ctrl, V_ctrl,
-            PF_ctrl (PF_ctrl_ind or PF_ctrl_cap for reactance of PF_ctrl) or tan(phi)_ctrl. Formerly called Voltage_ctrl
-
-            **tol=0.001** - Tolerance for controller convergence.
-
-            **gen_Q_response** - List of +/- 1 that indicates the Q gen response of the measurement location. Used in
-            order to invert the droop value of the controller.
-
-            **ctrl_in_service=True** - Whether the controller itself is in service.
-
-            **order=0** - Execution order of the controller.
-
-            **level=0** - Execution level of the controller.
-
-            **drop_same_existing_ctrl=False** - Whether to drop existing controllers with the same parameters.
-
-            **matching_params=None** - Parameters for matching controllers.
-
-            **name=""** - Name of the controller.
-
-            **kwargs** - Additional keyword arguments.
+            net : pandapowerNet
+                A pandapower grid
+            ctrl_in_service : bool
+                Whether the controller is in service or not.
+            output_element : str
+                Output element of the controller. Takes a string value "gen" or "sgen", with
+                reactive power control, currently only "sgen" is supported.
+            output_variable : str
+                Output variable of that element, normally "q_mvar".
+            output_element_index : int or list of int
+                Index or list of indices of the output element(s) in net (e.g. "net.sgen").
+            output_element_in_service : list of bool
+                List indicating whether each output element is in service.
+            input_element : str
+                Measurement location, can be a transformer, switches or lines. Must be a bus for
+                V_ctrl. Indicated by string value "res_trafo", "res_switch", "res_line" or "res_bus". In case of
+                "res_switch", an additional small impedance is introduced in the switch.
+            input_variable : str
+                Variable which is used to take the measurement from. Indicated by string value. Must
+                be 'vm_pu' for 'V_ctrl'.
+            input_element_index : int or list of int
+                Element of input element in net. Controlled bus in case of Voltage control. Can be
+                given the string 'auto' in control_modus 'V_ctrl' to automatically select a bus whose nominal voltage is >= X kV.
+                The X must be given to 'set_point'. Will take target voltage of the encountered bus. If no bus is found,
+                uses the bus next to the controlled generator group. Not completely implemented, generators on multiple buses
+                are not correctly handled.
+            input_inverted : list of bool
+                Indicates whether the measurement of each input element must be inverted.
+                Required when importing from PowerFactory.
+            control_modus : str
+                Enables the selection of the available control modi by taking one of the strings: Q_ctrl, V_ctrl,
+                PF_ctrl (PF_ctrl_ind or PF_ctrl_cap for reactance of PF_ctrl) or tan(phi)_ctrl. Formerly called Voltage_ctrl
+            set_point : float
+                Set point of the controller, can be a reactive power provision or a voltage set point. In
+                case of voltage set point, control_modus must be V_ctrl, input_element_index must be a bus (input_variable must be
+                'vm_pu' input_element must be 'res_bus'). Can be overwritten by a droop controller chained with the binary
+                search control. If 'V_ctrl' and automated bus selection (input_element_index == 'auto'), set_point will be
+                the search criteria in kV for the controlled bus (V_bus >= V_set_point).
+            output_values_distribution : str
+                Takes string to select one of the different available reactive power distribution
+                methods: 'rel_P' -Q is relative to used Power, 'rel_rated_S' -Q is relative to the rated power S, currently
+                using the sgen attribute 'sn_mva', 'set_Q' -set individual reactive power for each output element,
+                'max_Q' -maximized reactive power reserve for the output elements, 'rel_V_pu' -Q is relative to the voltage
+                limits of the output element.
+            output_distribution_values : None
+                The values of the Q distribution, only applicable if q_distribution = 'set_Q' or rel_V_pu.
+                For 'set_Q': list of floats - Distribution of reactive power provision among output elements (must sum to 1).
+                For 'rel_V_pu': list of lists - Must be a list containing lists
+                [Target Voltage, minimal allowed Voltage, maximal allowed Voltage] for each output element.
+            output_min_q_mvar : list of floats
+                Minimum Q limits for each output element. Considered when ``runpp`` is
+                executed with ``enforce_q_lims=True``.
+            output_max_q_mvar: list of floats
+                Maximum Q limits for each output element. Considered when ``runpp`` is
+                executed with ``enforce_q_lims=True``.
+            tol : float, optional
+                Tolerance for controller convergence. Default is ``0.001``
+            ctrl_in_service : bool, optional
+                Whether the controller is in service. Default is ``True``.
+            order : int, optional
+                Execution order of the controller.
+            level : int, optional
+                Execution level of the controller.
+            drop_same_existing_ctrl : bool, optional
+                Whether to drop existing controllers with the same parameters. Default is False
+            matching_params : dict, optional
+                Parameters used to match controllers. Default is None
+            name : str, optional
+                Name of the controller.
+            kwargs : dict, optional
+                Additional keyword arguments.
        """
     def __init__(self, net, ctrl_in_service:bool, output_element, output_variable, output_element_index,
                  output_element_in_service, input_element, input_variable,
@@ -1092,11 +1095,24 @@ class BinarySearchControl(Controller):
 
     def _update_min_max_q_mvar(self, net):
         if 'min_q_mvar' in net[self.output_element].columns:
-            self.output_min_q_mvar = np.nan_to_num(net[self.output_element].loc[self.output_element_index, 'min_q_mvar'].values, nan=-np.inf)
+            if not np.all(np.isnan(net[self.output_element].loc[self.output_element_index, 'id_q_capability_characteristic'].values)):
+                qmin, _ = get_min_max_q_mvar_from_characteristics_object(net, self.output_element, self.output_element_index)
+                self.output_min_q_mvar = np.nan_to_num(qmin, nan=-np.inf)
+                net[self.output_element].loc[self.output_element_index, 'min_q_mvar'] = self.output_min_q_mvar
+            else:
+                self.output_min_q_mvar = np.nan_to_num(net[self.output_element].loc[self.output_element_index, 'min_q_mvar'].values, nan=-np.inf)
+                net[self.output_element].loc[self.output_element_index, 'min_q_mvar'] = self.output_min_q_mvar
         else:
             self.output_min_q_mvar = np.array([-np.inf]*len(self.output_element_index), dtype=np.float64)
+
         if 'max_q_mvar' in net[self.output_element].columns:
-            self.output_max_q_mvar = np.nan_to_num(net[self.output_element].loc[self.output_element_index, 'max_q_mvar'].values, nan=np.inf)
+            if not np.all(np.isnan(net[self.output_element].loc[self.output_element_index, 'id_q_capability_characteristic'].values)):
+                _, qmax = get_min_max_q_mvar_from_characteristics_object(net, self.output_element, self.output_element_index)
+                self.output_max_q_mvar = np.nan_to_num(qmax, nan=np.inf)
+                net[self.output_element].loc[self.output_element_index, 'max_q_mvar'] = self.output_max_q_mvar
+            else:
+                self.output_max_q_mvar = np.nan_to_num(net[self.output_element].loc[self.output_element_index, 'max_q_mvar'].values, nan=np.inf)
+                net[self.output_element].loc[self.output_element_index, 'max_q_mvar'] = self.output_max_q_mvar
         else:
             self.output_max_q_mvar = np.array([np.inf]*len(self.output_element_index), dtype=np.float64)
 
