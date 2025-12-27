@@ -58,7 +58,7 @@ def test_volt_ctrl():
     assert (abs(net.res_bus.loc[1, "vm_pu"] - 0.999648) < tol)
     runpp(net, run_control=True)
     assert (abs(net.res_bus.loc[1, "vm_pu"] - 1.02) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
 
 
 def test_volt_ctrl_droop():
@@ -74,9 +74,8 @@ def test_volt_ctrl_droop():
     runpp(net, run_control=False)
     assert(abs(net.res_bus.loc[1, "vm_pu"] - 0.999648) < tol)
     runpp(net, run_control=True)
-    assert(net.controller.object[0].converged == True and net.controller.object[1].converged == True)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(abs(net.res_bus.loc[1, "vm_pu"] - (1.02 + net.res_trafo.loc[0, "q_hv_mvar"] / 40)) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
     assert(net.controller.at[0, 'object'].control_modus == 'V_ctrl')#test correct control_modus
     assert(net.controller.at[1, 'object'].control_modus == 'V_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].controller_idx == 0)  # test droop controller linkage
@@ -94,7 +93,7 @@ def test_qctrl():
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - (-6.092016e-12)) < tol)
     runpp(net, run_control=True)
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - 1.0) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
 
 
@@ -110,6 +109,7 @@ def test_qctrl_Imp_Input():
     runpp(net, run_control=False)
     assert (abs(net.res_impedance.loc[0, "q_to_mvar"] - 0.01373636) < tol)
     runpp(net, run_control=True)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert (abs(net.res_impedance.loc[0, "q_to_mvar"] - 1.0) < tol)
 
 def test_qctrl_droop():
@@ -127,10 +127,9 @@ def test_qctrl_droop():
     runpp(net, run_control=False)
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - (-7.094325e-13)) < tol)
     runpp(net, run_control=True)
-    assert(net.controller.object[0].converged == True and net.controller.object[1].converged == True)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(abs(net.controller.object[0].input_sign[0] * net.res_line.loc[0, "q_from_mvar"] - (
             net.controller.object[1].q_set_mvar_bsc + (0.995 - net.res_bus.loc[1, "vm_pu"]) * 40)) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
     assert(net.controller.at[0, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].controller_idx == 0)  # test droop controller linkage
@@ -147,8 +146,8 @@ def test_qlimits_qctrl():
                                    input_variable=["q_to_mvar"], input_element_index=0, set_point=1,
                                    voltage_ctrl=False, tol=1e-6)
     runpp(net, run_control=True, enforce_q_lims=True)
-    assert (abs(net.res_sgen.loc[0, "q_mvar"] - 0.5) < tol)
-
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
+    assert(abs(net.res_sgen.loc[0, "q_mvar"] - 0.5) < tol)
     net = simple_test_net()
     tol = 1e-6
     net.sgen['min_q_mvar'] = -0.5
@@ -161,7 +160,8 @@ def test_qlimits_qctrl():
                                    input_variable=["q_to_mvar"], input_element_index=0, set_point=1,
                                    voltage_ctrl=False, tol=1e-6)
     runpp(net, run_control=True, enforce_q_lims=True)
-    assert (abs(net.res_sgen.loc[0, "q_mvar"] + 0.5) < tol)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
+    assert(abs(net.res_sgen.loc[0, "q_mvar"] + 0.5) < tol)
 
 def test_qlimits_voltctrl():
     net = simple_test_net()
@@ -175,6 +175,7 @@ def test_qlimits_voltctrl():
                                    input_element="res_bus", input_variable="vm_pu", input_element_index=[1],
                                    set_point=1.02, voltage_ctrl=True, tol=tol)
     runpp(net, run_control=True, enforce_q_lims=True)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert (abs(net.res_sgen.loc[0, "q_mvar"] - 0.7) < tol)
 
     net = simple_test_net()
@@ -190,6 +191,7 @@ def test_qlimits_voltctrl():
     assert (abs(net.res_sgen.loc[0, "q_mvar"] + 0.7) < tol)
     net.sgen.min_q_mvar = -0.8 # tests change of min_q_mvar afterwards
     runpp(net, run_control=True, enforce_q_lims=True)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert (abs(net.res_sgen.loc[0, "q_mvar"] + 0.8) < tol)
 
 def test_station_ctrl_pf_import():
@@ -197,16 +199,17 @@ def test_station_ctrl_pf_import():
     net = from_json(path)
     tol = 1e-6
     runpp(net, run_control=True)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index)) #check controller convergence
     print("\n")
     print("--------------------------------------")
     print("Scenario 1 - Constant Q")
     print("Controlled line 0 to, expected constQ = -0.86 MVar for q_from_mvar and constQ = 0.5 MVar for q_to_mvar: \n",
           net.res_line.loc[0, "q_from_mvar"], "\t", net.res_line.loc[0, "q_to_mvar"])
     print("Controlled line 1 to, expected constQ = -0.86 MVar for q_from_mvar and constQ = 0.5 MVar for q_to_mvar: \n",
-          net.res_line.loc[1, "q_from_mvar"], "\t", net.res_line.loc[1, "q_to_mvar"])
+          net.res_line.loc[2, "q_from_mvar"], "\t", net.res_line.loc[2, "q_to_mvar"])
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - 0.5) < tol)
-    assert(abs(net.res_line.loc[1, "q_to_mvar"] - 0.5) < tol)
-    assert(net.controller.at[1, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
+    assert(abs(net.res_line.loc[2, "q_to_mvar"] - 0.5) < tol)
+    assert(net.controller.at[0, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
     print("--------------------------------------")
     print("Scenario 2 - Constant V, droop 40 MVar/pu")
     print("Input Measurement line 4 q_from_mvar and q_to_mvar, expected: \n -0.6215 MVar \t 0.2442 MVar \n",
@@ -216,27 +219,27 @@ def test_station_ctrl_pf_import():
     print("Controlled bus, initial set point 1.01 pu and 40 MVar/pu, vm_pu, \n expected: "
           "2 * 0.2442 MVar / 40 MVar/pu + 1.01 pu = 1.02221: \n", net.res_bus.loc[62, "vm_pu"])
     assert(abs(net.res_bus.loc[62, "vm_pu"] - (1.01 + ((net.res_line.loc[4, "q_to_mvar"] +
-                                             net.res_line.loc[5, "q_to_mvar"]) /
-                                            40))) < tol)  # still not close enough, increased tolerance
-    assert(net.controller.at[2, 'object'].control_modus == 'V_ctrl')  # test correct control_modus
+                                                        net.res_line.loc[5, "q_to_mvar"]) /
+                                                        net.controller.object[4].q_droop_mvar))) < tol)
+    assert(net.controller.at[4, 'object'].control_modus == 'V_ctrl')  # test correct droop control_modus
     assert(net.controller.at[3, 'object'].control_modus == 'V_ctrl')  # test correct control_modus
-    assert(net.controller.at[3, 'object'].controller_idx == 2)  # test droop controller linkage
+    assert(net.controller.at[4, 'object'].controller_idx == 3)  # test droop controller linkage
     print("--------------------------------------")
     print("Scenario 3 - Constant V")
     print("Controlled bus, set point = 1.03 pu, vm_pu: ", net.res_bus.loc[84, "vm_pu"])
     assert(abs(net.res_bus.loc[84, "vm_pu"] - 1.03) < tol)
-    assert(net.controller.at[0, 'object'].control_modus == 'V_ctrl')  # test correct control_modus
+    assert(net.controller.at[5, 'object'].control_modus == 'V_ctrl')  # test correct control_modus
     print("--------------------------------------")
     print("Scenario 4 - Q(U) - droop 40 MVar/pu")
-    print("Input Measurement vm_pu: ", net.res_bus.loc[103, "vm_pu"])
+    print("Input Measurement vm_pu: ", net.res_bus.loc[91, "vm_pu"])
     print("Controlled Transformer Q, lower voltage band 0.999 pu, initial set point 1 MVar and 40 MVar/pu, q_hv_mvar, "
           "expected: \n -(1 MVar + (0.999 pu  - 0.99585 pu) * 40 MVar/pu)= -1.12618: \n",
           net.res_trafo.loc[3, "q_hv_mvar"])
-    assert(abs(net.res_trafo.loc[3, "q_hv_mvar"] - (-(1 + (0.999 - net.res_bus.loc[103, "vm_pu"]) * 40))) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
-    assert(net.controller.at[4, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
-    assert(net.controller.at[5, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
-    assert(net.controller.at[5, 'object'].controller_idx == 4) #test droop controller linkage
+    assert(abs(net.res_trafo.loc[3, "q_hv_mvar"] - -(1 + (0.999 - net.res_bus.loc[91, "vm_pu"])
+                                                      * net.controller.object[2].q_droop_mvar)) < tol)
+    assert(net.controller.at[2, 'object'].control_modus == 'Q_ctrl')  # test correct droop control_modus
+    assert(net.controller.at[1, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
+    assert(net.controller.at[2, 'object'].controller_idx == 1)  # test droop controller linkage
 
 ### Testing after rework of station controller###
 
@@ -253,7 +256,7 @@ def test_volt_ctrl_new():
     assert(abs(net.res_bus.loc[1, "vm_pu"] - 0.999648) < tol)
     runpp(net, run_control=True)
     assert(abs(net.res_bus.loc[1, "vm_pu"] - 1.02) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'V_ctrl')  # test correct control_modus
 
 
@@ -271,7 +274,7 @@ def test_volt_ctrl_droop_new():
     assert(abs(net.res_bus.loc[1, "vm_pu"] - 0.999648) < tol)
     runpp(net, run_control=True)
     assert(abs(net.res_bus.loc[1, "vm_pu"] - (1.02 + net.res_trafo.loc[0, "q_hv_mvar"] / 40)) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'V_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].control_modus == 'V_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].controller_idx == 0)  # test droop controller linkage
@@ -289,7 +292,7 @@ def test_qctrl_new():
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - (-6.092016e-12)) < tol)
     runpp(net, run_control=True)
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - 1.0) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
 
 
@@ -308,8 +311,8 @@ def test_qctrl_droop_new():
     runpp(net, run_control=False)
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - (-7.094325e-13)) < tol)
     runpp(net, run_control=True)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - (1 + (0.995 - net.res_bus.loc[1, "vm_pu"]) * 40)) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
     assert(net.controller.at[0, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].controller_idx == 0)  # test droop controller linkage
@@ -328,7 +331,7 @@ def test_pf_control_cap():
     assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"] / net.res_line.loc[0, 'p_to_mw']) + 0.7953988 - np.arccos(0.7)) < tol)
     runpp(net, run_control = True)
     assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"]/net.res_line.loc[0, 'p_to_mw']) - - np.arccos(0.7)) < tol)#negative cause capacitive
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'PF_ctrl')  # test correct control_modus
 
 
@@ -345,7 +348,7 @@ def test_pf_control_ind():
     assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"] / net.res_line.loc[0, 'p_to_mw']) + 0.7953988 - np.arccos(0.7)) < tol)
     runpp(net, run_control = True)
     assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"]/net.res_line.loc[0, 'p_to_mw']) - np.arccos(0.7)) < tol)#positive = inductive
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'PF_ctrl')  # test correct control_modus
 
 
@@ -366,8 +369,8 @@ def test_pf_control_droop_q():
     m = ((1 - 0.9) + (1 - 0.5)) / (3 - 1)  # getting function #m = 0.3
     b = -(1 - 0.9) - m * 1 #-0.4
     droop_set_point = 1 - (m * net.res_line.loc[0, 'p_to_mw'] + b) #should be 0.8 #reactance positive cause droop set point > 1
-    assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"] / net.res_line.loc[0, 'p_to_mw']) - np.arccos(droop_set_point)) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"] / net.res_line.loc[0, 'p_to_mw']) - np.arccos(droop_set_point)) < tol) #0.64
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'PF_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].control_modus == 'PF_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].controller_idx == 0)  # test droop controller linkage
@@ -391,7 +394,7 @@ def test_pf_control_droop_v():
     b = (1 - -0.3) - m * 0.6 #b = 1.9
     droop_set_point = 1 - (m * net.res_bus.loc[1, 'vm_pu'] + b)  # should be 0.1388667029878976 #reactance positive cause droop set point > 1
     assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"] / net.res_line.loc[0, 'p_to_mw']) - np.arccos(droop_set_point)) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'PF_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].control_modus == 'PF_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].controller_idx == 0)  # test droop controller linkage
@@ -408,7 +411,7 @@ def test_tan_phi_control():
     assert(abs(net.res_trafo.loc[0, "q_lv_mvar"] / net.res_trafo.loc[0, 'p_lv_mw'] - 0.097382) < tol)
     runpp(net, run_control=True)
     assert(abs(net.res_trafo.loc[0, "q_lv_mvar"] / net.res_trafo.loc[0, 'p_lv_mw'] - 2) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'tan(phi)_ctrl')  # test correct control_modus
 
 
@@ -417,6 +420,7 @@ def test_station_ctrl_pf_import_new():
     net = from_json(path)
     tol = 1e-6
     runpp(net, run_control=True)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     print("\n")
     print("--------------------------------------")
     print("Scenario 1 - Constant Q")
@@ -513,7 +517,6 @@ def test_station_ctrl_pf_import_new():
           "\t", net.res_line.loc[21, 'q_to_mvar'] / net.res_line.loc[21, 'p_to_mw'])
     assert(abs(net.res_line.loc[20, "q_to_mvar"] / net.res_line.loc[20, 'p_to_mw'] - 0) < tol)
     assert(abs(net.res_line.loc[21, "q_to_mvar"] / net.res_line.loc[21, 'p_to_mw']  - 0) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
     assert(net.controller.at[7, 'object'].control_modus == 'tan(phi)_ctrl')  # test correct control_modus
 
 ### Testing the distributions###
@@ -528,12 +531,12 @@ def test_q_relative_to_p_dist():
     runpp(net, run_control = False)
     assert(net.sgen.at[0, 'q_mvar'] == net.sgen.at[1, 'q_mvar'])
     runpp(net, run_control = True)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.sgen.at[0, 'q_mvar'] != net.sgen.at[1, 'q_mvar'])
     assert(abs(net.sgen.at[0, 'q_mvar']/(net.sgen.at[0, 'q_mvar'] + net.sgen.at[1, 'q_mvar']) - net.sgen.at[0, 'p_mw']/(
         net.sgen.at[0, 'p_mw'] + net.sgen.at[1, 'p_mw'])) < tol)
     assert(abs(net.sgen.at[1, 'q_mvar'] / (net.sgen.at[0, 'q_mvar'] + net.sgen.at[1, 'q_mvar'])-net.sgen.at[1, 'p_mw']/(
         net.sgen.at[0, 'p_mw'] + net.sgen.at[1, 'p_mw'])) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
     assert(net.controller.at[0, 'object'].control_modus == 'V_ctrl')  # test correct control_modus
 
 
@@ -551,7 +554,7 @@ def test_q_relative_to_rated_s_dist(): #rated p is not implemented and defaults 
     assert (net.sgen.at[0, 'q_mvar'] != net.sgen.at[1, 'q_mvar']) #not equal anymore, but the relative values are equal
     assert(net.sgen.at[0, 'q_mvar'] != 0 and net.sgen.at[1, 'q_mvar'] != 0) #prove that not 0 divided by values
     assert(net.sgen.at[0, 'q_mvar'] / net.sgen.at[0, 'sn_mva'] == net.sgen.at[1, 'q_mvar'] / net.sgen.at[1, 'sn_mva'])
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
 
 def test_set_q_dist():
@@ -567,7 +570,7 @@ def test_set_q_dist():
     assert(net.sgen.at[0, 'q_mvar'] != net.sgen.at[1, 'q_mvar'])
     assert(abs(net.sgen.at[0, 'q_mvar'] / (net.sgen.at[0, 'q_mvar'] + net.sgen.at[1, 'q_mvar']) - 0.5 / (0.5 + 0.8)) < tol)
     assert(abs(net.sgen.at[1, 'q_mvar'] / (net.sgen.at[0, 'q_mvar'] + net.sgen.at[1, 'q_mvar']) - 0.8 / (0.5 + 0.8)) < tol)
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'PF_ctrl')  # test correct control_modus
 
 def test_max_q():
@@ -613,7 +616,7 @@ def test_max_q():
     assert(abs(net.sgen.at[idx_neg[0], 'q_mvar']) < abs(net.sgen.at[idx_neg[1], 'q_mvar']) < #redundant
            abs(net.sgen.at[idx_neg[2], 'q_mvar']) or abs(net.sgen.at[idx_pos[0], 'q_mvar']) <
            abs(net.sgen.at[idx_pos[1], 'q_mvar']) < abs(net.sgen.at[idx_pos[2], 'q_mvar']))
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'PF_ctrl')  # test correct control_modus
 
 
@@ -640,8 +643,8 @@ def test_rel_v_pu():
     runpp(net, run_control= True)
     assert(net.sgen.at[0, 'q_mvar'] != net.sgen.at[1, 'q_mvar']) #now controlled sgens
     assert(abs(net.res_bus.at[net.sgen.at[0, 'bus'], 'vm_pu'] + net.res_bus.at[net.sgen.at[1, 'bus'], 'vm_pu']
-                - 0.98 - 0.89) < tol) #now within set points
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+                - 0.98 - 0.89) < tol) #now at set points
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'tan(phi)_ctrl')  # test correct control_modus
 
 def test_station_ctrl_pf_import_distributions():#test comparability between PF and pp
@@ -662,7 +665,7 @@ def test_station_ctrl_pf_import_distributions():#test comparability between PF a
                 [-31.23760, 1]) < tol_v)) #rel_V_pu Q_vals
     assert(all(abs(np.array(net.res_bus.loc[net.sgen.loc[net.controller.at[4, 'object'].output_element_index].bus, 'vm_pu']) -
                 [0.89847, 0.98847 ]) < tol_v)) #rel_V_pu busbar voltage
-    assert(all(net.controller.at[i, 'object'].converged) for i in net.controller.index)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(net.controller.at[0, 'object'].control_modus == 'Q_ctrl')  # test correct control_modus
     assert(net.controller.at[1, 'object'].control_modus == 'tan(phi)_ctrl')  # test correct control_modus
     assert(net.controller.at[2, 'object'].control_modus == 'PF_ctrl')  # test correct control_modus
