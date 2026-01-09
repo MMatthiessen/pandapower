@@ -705,6 +705,8 @@ def _update_station_controller(net):
             controller_attr.min_q_mvar = []
         if not hasattr(controller_attr, "max_q_mvar") and controller_attr.__class__.__name__ == 'BinarySearchControl':
             controller_attr.max_q_mvar = []
+        if controller_attr.control_modus == "tan(phi)_ctrl":
+            controller_attr.control_modus = "tan_phi_ctrl"
 
 
 def convert_trafo_pst_logic(net):
