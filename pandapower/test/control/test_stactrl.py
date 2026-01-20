@@ -298,7 +298,7 @@ def test_pf_control_ind():
     assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'PF_ctrl_ind')  # test correct control_modus
 
 
-def test_pf_control_droop_q():
+def test_pf_control_droop_p():
     net = simple_test_net()
     tol = 1e-6
     bsc = BinarySearchControl(net, ctrl_in_service=True,
@@ -307,8 +307,7 @@ def test_pf_control_droop_q():
                                          input_element="res_line", damping_factor=0.9, input_variable="q_to_mvar",
                                          input_element_index=0, set_point=1,control_modus='PF_ctrl_P_droop', tol=1e-6)
     DroopControl(net, bus_idx=1, pf_overexcited= 0.5, pf_underexcited= 0.9,
-                 vm_set_pu=1, vm_set_ub=3, vm_set_lb=1,
-                 controller_idx=bsc.index, control_modus='PF_ctrl_P_droop')
+                 vm_set_ub=3, vm_set_lb=1, controller_idx=bsc.index, control_modus='PF_ctrl_P_droop')
     runpp(net, run_control=False)
     assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"] / net.res_line.loc[0, 'p_to_mw']) - 0) < tol)
     runpp(net, run_control=True) #Phi at point = 1.0471975521726393, Q at point = 3.4641016229480206 P at point = 1.999999999976119
@@ -660,7 +659,7 @@ def test_qlimits_voltctrl():
                                    set_point=1.02, voltage_ctrl=True, tol=tol)
     runpp(net, run_control=True, enforce_q_lims=True)
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
-    assert (abs(net.res_sgen.loc[0, "q_mvar"] - 0.7) < tol)
+    assert(abs(net.res_sgen.loc[0, "q_mvar"] - 0.7) < tol)
 
     net = simple_test_net()
     tol = 1e-6
@@ -672,14 +671,30 @@ def test_qlimits_voltctrl():
                                    input_element="res_bus", input_variable="vm_pu", input_element_index=[1],
                                    set_point=.98, voltage_ctrl=True, tol=tol)
     runpp(net, run_control=True, enforce_q_lims=True)
-    assert (abs(net.res_sgen.loc[0, "q_mvar"] + 0.7) < tol)
+    assert(abs(net.res_sgen.loc[0, "q_mvar"] + 0.7) < tol)
     net.sgen.min_q_mvar = -0.8 # tests change of min_q_mvar afterwards
     runpp(net, run_control=True, enforce_q_lims=True)
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert (abs(net.res_sgen.loc[0, "q_mvar"] + 0.8) < tol)
 
-def test_q_limits_pf_ctrl():#todo
-    pass
+def test_q_limits_pf_ctrl():#todo droop with other q limits
+    net = simple_test_net()
+    tol = 1e-6
+    net.sgen['min_q_mvar'] = -0.7
+    net.sgen['max_q_mvar'] = 0.7
+    bsc = BinarySearchControl(net, name="BSC1PF", ctrl_in_service=True, output_element="sgen", output_variable="q_mvar",
+                        output_element_index=[0], output_element_in_service=[True], output_values_distribution="rel_P",
+                        input_element="res_line", input_variable="q_to_mvar", input_element_index=0, set_point=0,
+                        control_modus="PF_ctrl_P_droop")
+    DroopControl(net, name="DROOP1PF", control_modus="PF_ctrl_P_droop", controller_idx=bsc.index, pf_overexcited=0.7,
+                 pf_underexcited= 0.3, vm_set_ub=0.2, vm_set_lb=0.6)
+    runpp(net, run_control=True, enforce_q_lims=False)
+    #assert(all(net.controller.object[i].converged == True for i in net.controller.index))
+    #assert(abs(net.res_sgen.loc[0, "q_mvar"] + 0.7) > tol)
+    runpp(net, run_control = True, enforce_q_lims=True)
+    assert(all(net.controller.object[i].converged == True for i in net.controller.index))
+    assert(abs(net.res_sgen.loc[0, "q_mvar"] + 0.7) < tol)
+
 
 def test_q_limits_tan_phi_ctrl():
     pass

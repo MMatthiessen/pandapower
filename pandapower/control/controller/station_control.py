@@ -476,10 +476,8 @@ class BinarySearchControl(Controller):
                                f" types 'rel_P', 'max_Q', 'set_Q', 'rel_V_pu' or 'rel_rated_S'\n")
                 self.output_values_distribution = ControlModusEnum.rel_P
         ###updating input & output elements in service lists
-        self.input_element_in_service = list(self.input_element_in_service)
-        self.output_element_in_service = list(self.output_element_in_service)
-        self.input_element_in_service.clear()
-        self.output_element_in_service.clear()
+        self.input_element_in_service = []
+        self.output_element_in_service = []
         for input_index in np.atleast_1d(self.input_element_index):
             if self.input_element == "res_line":
                 self.input_element_in_service.append(net.line.in_service[input_index])
@@ -595,6 +593,13 @@ class BinarySearchControl(Controller):
             if self.diff is None: #first step for assured bsc_ctrl_step
                 self.diff = 1
             else:
+                if -0.012 < self.set_point < 0.012:
+                    min_q = -0.012
+                    max_q = -min_q
+                    self.set_point = np.where((self.set_point >= 0) & (self.set_point <= max_q), max_q, self.set_point)
+                    self.set_point = np.where((self.set_point >= min_q) & (self.set_point < 0), min_q, self.set_point)
+                    logger.warning(f"Power factor calculation with set_point 0 not possible with BSC {self.index}.\n"
+                                   f"Maximizing Q output by clipping set_point to {self.set_point}\n")
                 q_set = self.reactance * sum(p_input_values)/len(p_input_values) * (np.tan(np.arccos(self.set_point)))
                 self.diff = q_set - sum(input_values)/len(input_values)
             self.converged = np.all(np.abs(self.diff)<self.tol)
@@ -1244,9 +1249,9 @@ class DroopControl(Controller):
                     Whether the droop controller is in service or not. Default is True
                 control_modus : str
                     takes string: Q_ctrl_V_droop, V_ctrl_Q_droop or PF_ctrl. Select droop variety of
-                    PF_ctrl by choosing 'PF_ctrl_P' for P-Characteristic or 'PF_ctrl_V'
-                    for droop-characteristic. PF_ctrl_P takes the active
-                    power at the input_element as reference, for PF_ctrl_V the reference voltage must be defined via the
+                    PF_ctrl by choosing 'PF_ctrl_P_droop' for P-Characteristic or 'PF_ctrl_V_droop'
+                    for droop-characteristic. PF_ctrl_P_droop takes the active
+                    power at the input_element as reference, for PF_ctrl_V_droop the reference voltage must be defined via the
                     bus_idx. Formerly called voltage_ctrl.
                 q_droop_var : float
                     Droop Value in Mvar/p.u. in case of Q or V control.
@@ -1365,6 +1370,7 @@ class DroopControl(Controller):
                 logger.warning(f"Control_modus {self.control_modus} not recognized, using 'Q_ctrl_V_droop' from available"
                                f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan_phi_ctrl'\n")
                 self.control_modus = ControlModusEnum.q_ctrl_v_droop
+
         if self.control_modus == ControlModusEnum.PF_ctrl:#legacy ambiguous
             self.control_modus = ControlModusEnum.PF_ctrl_ind
         if self.control_modus in ControlModusEnum.pf_modes() and not self.control_modus in ControlModusEnum.droop_modes(): #PF_droop
@@ -1531,7 +1537,7 @@ class DroopControl(Controller):
     def _droop_control_step(self, net):
         ###calculating new set point###
         if self.control_modus == ControlModusEnum.q_ctrl_v_droop or self.control_modus == ControlModusEnum.PF_ctrl_v_droop: #getting voltage
-            self.vm_pu = read_from_net(net, "res_bus", self.bus_idx, "vm_pu", self.read_flag)
+            self.vm_pu = read_from_net(net, "res_bus", int(getattr(self, "bus_idx", 0) or 0), "vm_pu", "single_index")
         elif self.control_modus in ControlModusEnum.v_modes():
             self.vm_pu = net.controller.at[self.controller_idx,'object'].set_point
         self.vm_pu_old = self.vm_pu
