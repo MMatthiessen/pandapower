@@ -322,7 +322,7 @@ def from_pf(
                                 include_impedances=True, nogobuses=None, notravbuses=None, multi=True,
                                 calc_branch_impedances=False, branch_impedance_unit='ohm', include_out_of_service=True)
         for n, stactrl in enumerate(dict_net['ElmStactrl'], 1):
-            create_stactrl(net=net, item=stactrl, top=top, top_all=top_all)
+            create_stactrl(net=net, item=stactrl, top=top, top_all=top_all, **dict_net)
         if n > 0: logger.info('imported %d station controllers' % n)
 
     remove_folder_of_std_types(net)
@@ -3999,8 +3999,8 @@ def create_pp_vsc(net, item):
 
 
 def create_stactrl(net, item, top, top_all, **kwargs):
-    if 'bus_dict_Elm_Term' in kwargs:
-        bus_dict_stactrl = kwargs.get('bus_dict_Elm_Term')
+    if 'ElmTerm' in kwargs:
+        bus_dict_stactrl = kwargs.get('ElmTerm')
     else:
         bus_dict_stactrl = None
     stactrl_in_service = True
@@ -4045,24 +4045,22 @@ def create_stactrl(net, item, top, top_all, **kwargs):
 
     # Overwrite gen_type if local control differs from station controller type
     if control_mode is not None:
-        if item.i_droop and control_mode == 0: #todo obsolete
+        if control_mode == 0: #V_ctrl
             for i in range(len(gen_types)):
                 gen_types[i] = "gen"
+        elif control_mode == 1: #Q_ctrl
+            for i in range(len(gen_types)):
+                gen_types[i] = "sgen"
+        elif control_mode == 2: #PF
+            for i in range(len(gen_types)):
+                gen_types[i] = "sgen"
+        elif control_mode == 3: #tan(phi)
+            for i in range(len(gen_types)):
+                gen_types[i] = "sgen"
         else:
-            if control_mode == 0: #V_ctrl
-                for i in range(len(gen_types)):
-                    gen_types[i] = "gen"
-            elif control_mode == 1: #Q_ctrl
-                for i in range(len(gen_types)):
-                    gen_types[i] = "sgen"
-            elif control_mode == 2: #PF
-                for i in range(len(gen_types)):
-                    gen_types[i] = "sgen"
-            elif control_mode == 3: #tan(phi)
-                for i in range(len(gen_types)):
-                    gen_types[i] = "sgen"
-            else:
-                print("station control type not supported!")
+            raise UserWarning("station control type not supported!")
+    else:
+        raise UserWarning(f"missing control mode. was given {control_mode} instead")
 
     if "other" in gen_types or len(np.unique(gen_types)) > 1:
         logger.error(f"Generator type not supported {gen_types} for {item.loc_name}")
@@ -4134,16 +4132,12 @@ def create_stactrl(net, item, top, top_all, **kwargs):
     else:
         raise NotImplementedError(f'Reactive Power Distribution must be between 0 and 4, not {item.imode}')
 
-    if sum(distribution)!=1:
+    if distribution_val is not None and sum(distribution_val)!=1:
         logger.info(f'{item}: sum of reactive power dstribution is unequal to 1 but will be normalized in binary search control.')
 
     phase = item.i_phase
     if phase != 0:
         raise NotImplementedError(f"{item}: phase {item.i_phase=} not implemented")
-
-    # Controlled Node: User selection vs Automatic selection  # User selection
-    if item.selBus != 0:
-        raise NotImplementedError(f"{item}: controlled node selection {item.selBus=} not implemented")
 
     variable = None
     res_element_table = None
@@ -4275,10 +4269,10 @@ def create_stactrl(net, item, top, top_all, **kwargs):
                         f"{item}: Station Controller with switch measurement that cannot be relocated, adding switch with "
                         f"small impedance")
 
-                        res_element_index.append(switch_dict[element])
-                        net.switch.at[res_element_index[-1], "z_ohm"] = 1e-3
-                        variable.append("q_from_mvar" if q_control_side[0] == 0 else "q_to_mvar")
-                        res_element_table = "res_switch"
+                    res_element_index.append(switch_dict[element])
+                    net.switch.at[res_element_index[-1], "z_ohm"] = 1e-3
+                    variable.append("q_from_mvar" if q_control_side[0] == 0 else "q_to_mvar")
+                    res_element_table = "res_switch"
             else:
                 logger.error(
                     f"{item}: only line, impedance, trafo 2W/3W element and switch flows can be controlled, {element_class[0]=}")
@@ -4317,12 +4311,6 @@ def create_stactrl(net, item, top, top_all, **kwargs):
     for n in range(len(input_busses)):
         for m in range(len(output_busses)):
             has_path = has_path or nx.has_path(top, input_busses[n], output_busses[m])
-    if not has_path and control_mode != 0 and not item.i_droop:
-        if control_mode ==1: control_modus = "Q"
-        elif control_mode == 2: control_modus = 'Power Factor'
-        else: control_modus = 'tangens'
-        logger.error(f'no path found, skipping {control_modus} controller')
-        return
 
     if control_mode == 0:  # VOLTAGE CONTROL
         # Controlled Node: User selection vs Automatic selection  # User selection
@@ -4407,7 +4395,7 @@ def create_stactrl(net, item, top, top_all, **kwargs):
                                name=item.loc_name,
                                ctrl_in_service=stactrl_in_service,
                                output_element=gen_element,
-                               output_variable="q_mvar",
+                               output_variable='q_mvar',
                                output_element_index=gen_element_index,
                                output_element_in_service=gen_element_in_service,
                                output_values_distribution=distribution_mode,
@@ -4531,7 +4519,6 @@ def create_stactrl(net, item, top, top_all, **kwargs):
                 input_element_index=res_element_index,
                 set_point=item.pfsetp,
                 input_inverted=input_inverted,
-                gen_Q_response=gen_Q_response,
                 control_modus='PF_ctrl_ind',
                 bus_idx=None,
                 tol=1e-6
@@ -4565,7 +4552,6 @@ def create_stactrl(net, item, top, top_all, **kwargs):
                 input_element_index=res_element_index,
                 set_point=item.pfsetp,
                 input_inverted=input_inverted,
-                gen_Q_response=gen_Q_response,
                 control_modus='PF_ctrl_ind',
                 bus_idx=None,
                 tol=1e-6
@@ -4603,7 +4589,6 @@ def create_stactrl(net, item, top, top_all, **kwargs):
             input_element_index=res_element_index,
             set_point=item.tansetp,
             input_inverted=input_inverted,
-            gen_Q_response=gen_Q_response,
             control_modus='tan(phi)_ctrl', tol=1e-6
         )
     else:

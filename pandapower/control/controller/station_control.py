@@ -665,7 +665,7 @@ class BinarySearchControl(Controller):
                 # normalize the values distribution
                 self._normalize_distribution_in_service()
         ### check soft limits after convergence###
-        if self.converged:
+        if self.converged and not net._options["enforce_q_lims"]: #check overshot of gens when not enforcing q_lims
             if self.output_values_distribution == ControlModusEnum.rel_V_pu:
                 vm_pu = read_from_net(net, "res_bus", self.bus_idx_dist, "vm_pu", 'auto')
                 v_max_pu = np.atleast_1d(self.v_max_pu)[self.output_element_in_service]
@@ -678,6 +678,7 @@ class BinarySearchControl(Controller):
                         logger.warning(f'Controller {self.index}: Generator {self.output_element} {self.output_element_index[i]}'
                             f' exceeded maximum Voltage at bus {self.bus_idx_dist[i]}: {vm_pu[i]} < {v_min_pu[i]}\n')
             if len(self.min_q_mvar) == len(self.max_q_mvar) == len(self.output_element_in_service):
+
                 exceed_limit_min = np.where(np.atleast_1d(self.output_values)[np.atleast_1d(self.output_element_in_service)]
                                             < np.atleast_1d(self.min_q_mvar)[np.atleast_1d(self.output_element_in_service)])[0]
                 exceed_limit_max = np.where(np.atleast_1d(self.output_values)[np.atleast_1d(self.output_element_in_service)]
