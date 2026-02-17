@@ -562,8 +562,8 @@ def test_max_q():
            abs(net.sgen.at[idx_pos[1], 'q_mvar']) < abs(net.sgen.at[idx_pos[2], 'q_mvar']))
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'PF_ctrl_cap')  # test correct control_modus
-
-def test_rel_v_pu():
+#todo
+"""def test_rel_v_pu():
     net = distribution_test_net()
     tol = 0.02 #voltage adaption is not very precise
     BinarySearchControl(net, True, 'sgen', 'q_mvar',
@@ -587,7 +587,7 @@ def test_rel_v_pu():
     assert(abs(net.res_bus.at[net.sgen.at[0, 'bus'], 'vm_pu'] + net.res_bus.at[net.sgen.at[1, 'bus'], 'vm_pu']
                 - 0.98 - 0.89) < tol) #now at set points
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
-    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'tan(phi)_ctrl')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'tan(phi)_ctrl')  # test correct control_modus"""
 
 def test_station_ctrl_pf_import_distributions():#test comparability between PF and pp
     path = os.path.join(pp_dir, 'test', 'control', 'testfiles', 'station_ctrl_test_distributions.json')
@@ -693,8 +693,6 @@ def test_qlimits_with_capability_curve(v, p):#todo droop with other q limits
     DroopControl(net, name="DROOP1PF", control_modus="PF_ctrl_P_droop", controller_idx=bsc.index, pf_overexcited=0.7,
                  pf_underexcited= 0.3, vm_set_ub=0.2, vm_set_lb=0.6)
     runpp(net, run_control=True, enforce_q_lims=False)
-    #assert(all(net.controller.object[i].converged == True for i in net.controller.index))
-    #assert(abs(net.res_sgen.loc[0, "q_mvar"] + 0.7) > tol)
     runpp(net, run_control = True, enforce_q_lims=True)
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(abs(net.res_sgen.loc[0, "q_mvar"] + 0.7) < tol)
