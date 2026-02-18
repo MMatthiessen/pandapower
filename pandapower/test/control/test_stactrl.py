@@ -681,21 +681,32 @@ def test_qlimits_voltctrl():
 
 @pytest.mark.parametrize("v", linspace(start=0.98, stop=1.02, num=5, dtype=float64))
 @pytest.mark.parametrize("p", linspace(start=-2.5, stop=2.5, num=10, dtype=float64))
-def test_qlimits_with_capability_curve(v, p):#todo droop with other q limits
-    net = simple_test_net()
+def test_qlimits_with_capability_curve(v, p):
     tol = 1e-6
-    net.sgen['min_q_mvar'] = -0.7
-    net.sgen['max_q_mvar'] = 0.7
-    bsc = BinarySearchControl(net, name="BSC1PF", ctrl_in_service=True, output_element="sgen", output_variable="q_mvar",
-                        output_element_index=[0], output_element_in_service=[True], output_values_distribution="rel_P",
-                        input_element="res_line", input_variable="q_to_mvar", input_element_index=0, set_point=0,
-                        control_modus="PF_ctrl_P_droop")
-    DroopControl(net, name="DROOP1PF", control_modus="PF_ctrl_P_droop", controller_idx=bsc.index, pf_overexcited=0.7,
-                 pf_underexcited= 0.3, vm_set_ub=0.2, vm_set_lb=0.6)
-    runpp(net, run_control=True, enforce_q_lims=False)
-    runpp(net, run_control = True, enforce_q_lims=True)
+    for v in linspace(start=0.98, stop=1.02, num=5, dtype=float64):
+        for p in linspace(start=-2.5, stop=2.5, num=10, dtype=float64):
+            net = simple_test_net()
+            create_sgen(net, 2, p_mw=0., sn_mva=0, name="sgen2")
+            # create q characteristics table
+            net["q_capability_curve_table"] = DataFrame(
+                {'id_q_capability_curve': [0, 0, 0, 0, 0],
+                'p_mw': [-2.0, -1.0, 0.0, 1.0, 2.0],
+                'q_min_mvar': [-0.1, -0.1, -0.1, -0.1, -0.1],
+                'q_max_mvar': [0.1, 0.1, 0.1, 0.1, 0.1]})
+
+    net.sgen.at[0, "id_q_capability_characteristic"] = 0
+    net.sgen['curve_style'] = "straightLineYValues"
+    create_q_capability_characteristics_object(net)
+    BinarySearchControl(net, name="BSC1", ctrl_in_service=True,
+                        output_element="sgen", output_variable="q_mvar", output_element_index=[0],
+                        output_element_in_service=[True], output_values_distribution="rel_P",
+                        input_element="res_bus", input_variable="vm_pu", input_element_index=[1],
+                        set_point=v, voltage_ctrl=True, tol=tol)
+    net.sgen.loc[0, 'p_mw'] = p
+    runpp(net, run_control=True, enforce_q_lims=True)
+    assert -0.1 <= net.res_sgen.loc[0, 'q_mvar'] <= 0.1
+    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'V_ctrl')
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
-    assert(abs(net.res_sgen.loc[0, "q_mvar"] + 0.7) < tol)
 
 
 def test_q_limits_tan_phi_ctrl():

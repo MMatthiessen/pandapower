@@ -4277,9 +4277,9 @@ def create_stactrl(net, item, top, top_all, **kwargs):
                 logger.error(
                     f"{item}: only line, impedance, trafo 2W/3W element and switch flows can be controlled, {element_class[0]=}")
                 return
-    #elif control_mode == 0:
-    else:
-        res_element_table = "res_bus"
+        #elif control_mode == 0:
+        else:
+            res_element_table = "res_bus"
     input_busses = []
     output_busses = []
     if res_element_table == "res_line":
