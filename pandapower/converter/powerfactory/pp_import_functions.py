@@ -24,7 +24,7 @@ from pandapower.run import set_user_pf_options
 from pandapower.std_types import add_zero_impedance_parameters, std_type_exists, create_std_type, available_std_types, \
     load_std_type
 from pandapower.toolbox.grid_modification import set_isolated_areas_out_of_service, drop_inactive_elements, drop_buses
-from pandapower.topology import create_nxgraph, calc_distance_to_bus
+from pandapower.topology import create_nxgraph
 from pandapower.control.util.auxiliary import create_q_capability_characteristics_object, \
     get_min_max_q_mvar_from_characteristics_object
 from pandapower.control.util.characteristic import SplineCharacteristic
@@ -811,8 +811,8 @@ def create_pp_line(net, item, flag_graphics, create_sections, is_unbalanced):
     except IndexError:
         logger.debug("Cannot add Line '%s': not connected" % params['name'])
         return
-    except:
-        logger.error("Error while exporting Line '%s'" % params['name'])
+    except Exception as e:
+        logger.error("Error %s while exporting Line '%s'", e, params['name'])
         return
 
     ac = bus_table == "bus"
@@ -2234,7 +2234,7 @@ def create_sgen_genstat(net, item, pv_as_slack, pf_variable_p_gen, dict_net, is_
                                               output_values_distribution=[1],
                                               input_element="res_gen", input_variable="q_mvar",
                                               input_inverted=[False], input_element_index=[next_index],
-                                              set_point=item.usetp, control_mode=True, bus_idx=bus, tol=1e-5)
+                                              set_point=item.usetp, control_modus = "V_ctrl_Q_droop_local", bus_idx=bus, tol=1e-5)
                     VDroopControl_local(net, name=item.loc_name + "_ctrl", q_droop_mvar=item.sgn * 100 / ddroop,
                                         q_set_mvar=item.qgini, vm_set_pu_bsc=item.usetp, bus_idx=bus,
                                         controller_idx=bsc.index)
@@ -4224,7 +4224,7 @@ def create_stactrl(net, item, top, top_all, **kwargs):
                         res[switch_dict[element]].get("direction")
                     )
                 else:
-                    element_type = None
+                    element_type, element_index, direction, connection_side = None, None, None, None
                 if element_type == "trafo":
                     res_element_table = "res_trafo"
                     res_element_index.append(element_index)
