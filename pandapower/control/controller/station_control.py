@@ -67,13 +67,13 @@ class BinarySearchControl(Controller):
                 'vm_pu' input_element must be 'res_bus'). Can be overwritten by a droop controller chained with the binary
                 search control. If 'V_ctrl' and automated bus selection (input_element_index == 'auto'), set_point will be
                 the search criteria in kV for the controlled bus (V_bus >= V_set_point).
-            output_values_distribution : str
+            distribution_method : str
                 Takes string to select one of the different available reactive power distribution
                 methods: 'rel_P' -Q is relative to used Power, 'rel_rated_S' -Q is relative to the rated power S, currently
                 using the sgen attribute 'sn_mva', 'set_Q' -set individual reactive power for each output element,
                 'max_Q' -maximized reactive power reserve for the output elements, 'rel_V_pu' -Q is relative to the voltage
                 limits of the output element.
-            output_distribution_values : None
+            output_values_distribution : None
                 The values of the Q distribution, only applicable if q_distribution = 'set_Q' or rel_V_pu.
                 For 'set_Q': list of floats - Distribution of reactive power provision among output elements (must sum to 1).
                 For 'rel_V_pu': list of lists - Must be a list containing lists
@@ -103,7 +103,7 @@ class BinarySearchControl(Controller):
        """
     def __init__(self, net, ctrl_in_service:bool, output_element, output_variable, output_element_index,
                  output_element_in_service, input_element, input_variable,
-                 input_element_index, set_point:float, output_values_distribution:str, output_distribution_values = None,
+                 input_element_index, set_point:float, distribution_method:str, output_values_distribution = None,
                  control_modus:str = None, name = "", input_inverted:list=None, gen_q_response:list=None, tol=0.001, order=0, level=0,
                  drop_same_existing_ctrl=False, matching_params=None, **kwargs):
         super().__init__(net, in_service=ctrl_in_service, order=order, level=level,
@@ -126,7 +126,7 @@ class BinarySearchControl(Controller):
         self.output_values = None
         self.output_values_old = None
         self.output_element = output_element #typically sgens, output of Q
-        self.output_distribution_values = output_distribution_values
+        self.output_values_distribution = output_values_distribution
         self.max_q_mvar = [] #limits of output element Q
         self.min_q_mvar = []
         self.diff = None
@@ -151,16 +151,16 @@ class BinarySearchControl(Controller):
             self.output_element_in_service = [output_element_in_service]
         else:
             self.output_element_in_service = output_element_in_service
-        if (isinstance(output_values_distribution, list) #ruggedized code for miss input
-            or isinstance(output_values_distribution, np.ndarray)) and isinstance(output_values_distribution[0], str):
-            self.output_values_distribution = output_values_distribution[0]
+        if (isinstance(distribution_method, list)  #ruggedized code for miss input
+            or isinstance(distribution_method, np.ndarray)) and isinstance(distribution_method[0], str):
+            self.distribution_method = distribution_method[0]
         else:
             try:
-                self.output_values_distribution = ControlModusEnum(output_values_distribution)
+                self.distribution_method = ControlModusEnum(distribution_method)
             except ValueError:
-                logger.warning(f"Control_modus {output_values_distribution} not recognized, using 'rel_P' from available"
+                logger.warning(f"Control_modus {distribution_method} not recognized, using 'rel_P' from available"
                                f" types 'rel_P', 'max_Q', 'set_Q', 'rel_V_pu' or 'rel_rated_S'\n")
-                self.output_values_distribution = ControlModusEnum.rel_P
+                self.distribution_method = ControlModusEnum.rel_P
         if input_element_index == 'auto':
             self.automatic_selection(net)
         elif isinstance(input_element_index, list) or isinstance(input_element_index, np.ndarray):
@@ -172,41 +172,41 @@ class BinarySearchControl(Controller):
         if self.tol is None: #old order
             self.tol = 0.001
         ###allocating distribution method and distribution values
-        if self.output_values_distribution == ControlModusEnum.rel_V_pu:
+        if self.distribution_method == ControlModusEnum.rel_V_pu:
             self.bus_idx_dist = []  # initializing bus idx
-            output_distribution_values = np.array(self.output_distribution_values)  # forming limit arrays
-            if output_distribution_values.ndim == 1:  # one controlled sgen
+            output_values_distribution = np.array(self.output_values_distribution)  # forming limit arrays
+            if output_values_distribution.ndim == 1:  # one controlled sgen
                 try:
-                    self.v_set_point_pu = np.array(output_distribution_values)[0]
-                    self.v_min_pu = np.minimum(np.array(output_distribution_values)[1],
-                                               np.array(output_distribution_values)[2])
-                    self.v_max_pu = np.maximum(np.array(output_distribution_values)[1], np.array(output_distribution_values)[2])
+                    self.v_set_point_pu = np.array(output_values_distribution)[0]
+                    self.v_min_pu = np.minimum(np.array(output_values_distribution)[1],
+                                               np.array(output_values_distribution)[2])
+                    self.v_max_pu = np.maximum(np.array(output_values_distribution)[1], np.array(output_values_distribution)[2])
                 except IndexError: #insufficient values in array
-                    logger.warning(f"Insufficient values in distribution rel_V_pu {self.output_distribution_values} In "
+                    logger.warning(f"Insufficient values in distribution rel_V_pu {self.output_values_distribution} In "
                                    f"Controller {self.index}. Using set point 1 pu and min/max 0.9/1.1 pu\n")
                     equal_array = [1, 0.9, 1.1]
-                    self.output_distribution_values = np.tile(equal_array, (len(np.array(self.output_element_in_service)), 1))[0]
-                    output_distribution_values = np.array(self.output_distribution_values)  # forming limit arrays
-                    self.v_set_point_pu = output_distribution_values[0]
-                    self.v_min_pu = output_distribution_values[1]
-                    self.v_max_pu = output_distribution_values[2]
+                    self.output_values_distribution = np.tile(equal_array, (len(np.array(self.output_element_in_service)), 1))[0]
+                    output_values_distribution = np.array(self.output_values_distribution)  # forming limit arrays
+                    self.v_set_point_pu = output_values_distribution[0]
+                    self.v_min_pu = output_values_distribution[1]
+                    self.v_max_pu = output_values_distribution[2]
 
-            elif output_distribution_values.ndim >= 2: #more than one controlled sgen
+            elif output_values_distribution.ndim >= 2: #more than one controlled sgen
                 try:#insufficient values in arrays
-                    self.v_set_point_pu = np.array(output_distribution_values)[:, 0]
-                    self.v_min_pu = np.minimum(np.array(output_distribution_values)[:, 1],np.array(output_distribution_values)[:, 2])
-                    self.v_max_pu = np.maximum(np.array(output_distribution_values)[:, 1],np.array(output_distribution_values)[:, 2])
+                    self.v_set_point_pu = np.array(output_values_distribution)[:, 0]
+                    self.v_min_pu = np.minimum(np.array(output_values_distribution)[:, 1], np.array(output_values_distribution)[:, 2])
+                    self.v_max_pu = np.maximum(np.array(output_values_distribution)[:, 1], np.array(output_values_distribution)[:, 2])
                 except IndexError:
-                    logger.warning(f"Insufficient values in distribution rel_V_pu {self.output_distribution_values} In "
+                    logger.warning(f"Insufficient values in distribution rel_V_pu {self.output_values_distribution} In "
                                    f"Controller {self.index}. Using set point 1 pu and min/max 0.9/1.1 pu\n")
                     equal_array = [1, 0.9, 1.1]
-                    self.output_distribution_values = np.full(len(np.array(self.output_element_in_service)),equal_array)
-                    output_distribution_values = np.array(self.output_distribution_values)  # forming limit arrays
-                    self.v_set_point_pu = output_distribution_values[:, 0]
-                    self.v_min_pu = output_distribution_values[:, 1]
-                    self.v_max_pu = output_distribution_values[:, 2]
+                    self.output_values_distribution = np.full(len(np.array(self.output_element_in_service)), equal_array)
+                    output_values_distribution = np.array(self.output_values_distribution)  # forming limit arrays
+                    self.v_set_point_pu = output_values_distribution[:, 0]
+                    self.v_min_pu = output_values_distribution[:, 1]
+                    self.v_max_pu = output_values_distribution[:, 2]
             else:
-                self.output_distribution_values = None
+                self.output_values_distribution = None
         ###finding correct control_modus, catching deprecated voltage_ctrl argument###
         if control_modus is None: #catching old attribute voltage_ctrl
             if hasattr(self, 'voltage_ctrl'):
@@ -303,10 +303,10 @@ class BinarySearchControl(Controller):
             self.min_q_mvar.append(min(min_q, max_q))
 
         #normalize the values distribution:
-        self._normalize_distribution_in_service(initial_pf_distribution=output_distribution_values)
+        self._normalize_distribution_in_service(initial_pf_distribution=output_values_distribution)
         self._update_min_max_q_mvar(net)
         self.output_adjustable = np.array([service if distribution is None else (False if not distribution else service)
-                                           for distribution, service in zip(output_values_distribution,
+                                           for distribution, service in zip(distribution_method,
                                                                             self.output_element_in_service)],
                                           dtype=np.bool)
         ###directions of q and inverted index
@@ -363,17 +363,12 @@ class BinarySearchControl(Controller):
         active_gens = np.array(self.output_element_in_service, dtype=bool).tolist() if (not self.output_element_in_service
                     or isinstance(self.output_element_in_service[0], (bool, np.bool_))) \
                     else np.atleast_1d(self.output_element_in_service)[:, 0].tolist()
-
-        if (isinstance(self.output_values_distribution, list) #ruggedized code for miss input, put here for legacy
-            or isinstance(self.output_values_distribution, np.ndarray)) and isinstance(self.output_values_distribution[0], str):
-            self.output_values_distribution = self.output_values_distribution[0]
-        else:
-            try:
-                self.output_values_distribution = ControlModusEnum(self.output_values_distribution)
-            except ValueError:
-                logger.warning(f"Control_modus {self.output_values_distribution} not recognized, using 'rel_P' from available"
-                               f" types 'rel_P', 'max_Q', 'set_Q', 'rel_V_pu' or 'rel_rated_S'\n")
-                self.output_values_distribution = ControlModusEnum.rel_P
+        try:
+            self.distribution_method = ControlModusEnum(self.distribution_method)
+        except ValueError:
+            logger.warning(f"Control_modus {self.distribution_method} not recognized, using 'rel_P' from available"
+                           f" types 'rel_P', 'max_Q', 'set_Q', 'rel_V_pu' or 'rel_rated_S'\n")
+            self.distribution_method = ControlModusEnum.rel_P
         if (self.control_modus in ControlModusEnum.v_modes() and self.output_element == 'gen' and
                 len(np.atleast_1d(self.output_element_index)[active_gens]) >= 2):
             fused_bus_by_switch = False
@@ -433,17 +428,17 @@ class BinarySearchControl(Controller):
         self.output_values = read_from_net(net, self.output_element, output_element_index, self.output_variable,
                                             self.write_flag)
         self.output_values_old = None
-        if self.output_values_distribution == ControlModusEnum.rel_V_pu:
+        if self.distribution_method == ControlModusEnum.rel_V_pu:
             self.output_adjustable = np.array([
                                 service if distribution is None else (False if not distribution else service)
                                 for distribution, service in zip(np.atleast_1d(np.atleast_2d(
-                                    self.output_distribution_values)[0][0]), np.atleast_1d(self.output_element_in_service))],
+                                    self.output_values_distribution)[0][0]), np.atleast_1d(self.output_element_in_service))],
                                 dtype=np.bool)
-        else: #rel_V_pu has arrays as output_distribution_values
+        else: #rel_V_pu has arrays as output_values_distribution
             self.output_adjustable = np.array([
                 service if distribution is None else (False if not distribution else service)
                 for distribution, service in zip(
-                    np.atleast_1d(self.output_distribution_values),
+                    np.atleast_1d(self.output_values_distribution),
                     np.atleast_1d(self.output_element_in_service)
                 )
             ], dtype=bool)
@@ -465,16 +460,16 @@ class BinarySearchControl(Controller):
                 logger.warning(f"Control_modus {self.control_modus} not recognized, using 'Q_ctrl' from available"
                                f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan_phi_ctrl'\n")
                 self.control_modus = ControlModusEnum.q_ctrl
-        if ((isinstance(self.output_values_distribution, list) #ruggedized code for miss input
-            or isinstance(self.output_values_distribution, np.ndarray)) and isinstance(self.output_values_distribution[0], str)):
-            self.output_values_distribution = self.output_values_distribution[0]
+        if ((isinstance(self.distribution_method, list)  #ruggedized code for miss input
+             or isinstance(self.distribution_method, np.ndarray)) and isinstance(self.distribution_method[0], str)):
+            self.distribution_method = self.distribution_method[0]
         else:
             try:
-                self.output_values_distribution = ControlModusEnum(self.output_values_distribution)
+                self.distribution_method = ControlModusEnum(self.distribution_method)
             except ValueError:
-                logger.warning(f"Control_modus {self.output_values_distribution} not recognized, using 'rel_P' from available"
+                logger.warning(f"Control_modus {self.distribution_method} not recognized, using 'rel_P' from available"
                                f" types 'rel_P', 'max_Q', 'set_Q', 'rel_V_pu' or 'rel_rated_S'\n")
-                self.output_values_distribution = ControlModusEnum.rel_P
+                self.distribution_method = ControlModusEnum.rel_P
         ###updating input & output elements in service lists
         self.input_element_in_service = []
         self.output_element_in_service = []
@@ -675,7 +670,7 @@ class BinarySearchControl(Controller):
                 self._normalize_distribution_in_service()
         ### check soft limits after convergence###
         if self.converged and not net._options["enforce_q_lims"]: #check overshot of gens when not enforcing q_lims
-            if self.output_values_distribution == ControlModusEnum.rel_V_pu:
+            if self.distribution_method == ControlModusEnum.rel_V_pu:
                 vm_pu = read_from_net(net, "res_bus", self.bus_idx_dist, "vm_pu", 'auto')
                 v_max_pu = np.atleast_1d(self.v_max_pu)[self.output_element_in_service]
                 v_min_pu = np.atleast_1d(self.v_min_pu)[self.output_element_in_service]
@@ -717,62 +712,62 @@ class BinarySearchControl(Controller):
         if not self.in_service: #redundant
             return
         ### Distribution corrections, no warnings due to q_limit incompatibility###
-        if getattr(self, 'output_distribution_values', None) is not None: #catch errors
-            if (self.output_values_distribution == ControlModusEnum.rel_P or
-                                                    self.output_values_distribution == ControlModusEnum.rel_rated_S or
-                                                    self.output_values_distribution == ControlModusEnum.max_Q):
-                self.output_distribution_values, output_distribution_values_in_service = None, None
-            elif self.output_values_distribution == ControlModusEnum.imported or self.output_values_distribution == ControlModusEnum.set_Q:
-                if len(self.output_distribution_values) < len(np.array(self.output_element_in_service)):#check if enough values
-                    equal_val = 1 / (len(np.array(self.output_element_in_service)-len(self.output_distribution_values)))
+        if getattr(self, 'output_values_distribution', None) is not None: #catch errors
+            if (self.distribution_method == ControlModusEnum.rel_P or
+                                                    self.distribution_method == ControlModusEnum.rel_rated_S or
+                                                    self.distribution_method == ControlModusEnum.max_Q):
+                self.output_values_distribution, output_distribution_values_in_service = None, None
+            elif self.distribution_method == ControlModusEnum.imported or self.distribution_method == ControlModusEnum.set_Q:
+                if len(self.output_values_distribution) < len(np.array(self.output_element_in_service)):#check if enough values
+                    equal_val = 1 / (len(np.array(self.output_element_in_service) - len(self.output_values_distribution)))
                     logger.warning(
-                        f'Mismatched lengths of output elements {self.output_element} and output_distribution_values'
-                        f'{len(np.array(self.output_element_in_service))} > {len(self.output_distribution_values)}'
+                        f'Mismatched lengths of output elements {self.output_element} and output_values_distribution'
+                        f'{len(np.array(self.output_element_in_service))} > {len(self.output_values_distribution)}'
                         f' in Controller {self.index}.\n' f'Appending values {equal_val} \n')
-                    self.output_distribution_values = (np.append(self.output_distribution_values, [equal_val] *
-                                         (len(self.output_element_in_service) - len(self.output_distribution_values))))
+                    self.output_values_distribution = (np.append(self.output_values_distribution, [equal_val] *
+                                                                 (len(self.output_element_in_service) - len(self.output_values_distribution))))
                 output_element_in_service = np.array(self.output_element_in_service)#ruggedizing code for wrong inputs
-                output_element_in_service.resize((len(np.array(self.output_distribution_values)),), refcheck=False)
-                output_distribution_values_in_service = (np.array(self.output_distribution_values)
+                output_element_in_service.resize((len(np.array(self.output_values_distribution)),), refcheck=False)
+                output_distribution_values_in_service = (np.array(self.output_values_distribution)
                 [np.array(output_element_in_service)]) ###only distributing between active output elements
-            elif self.output_values_distribution == ControlModusEnum.rel_V_pu:
-                if ((np.array(self.output_distribution_values).ndim > 1 and any(len(element) != 3 for element in self.output_distribution_values))
-                        or (np.array(self.output_distribution_values).ndim == 1 and len(self.output_distribution_values) != 3)):
-                    logger.warning(f"Insufficient values in distribution rel_V_pu {self.output_distribution_values} In "
+            elif self.distribution_method == ControlModusEnum.rel_V_pu:
+                if ((np.array(self.output_values_distribution).ndim > 1 and any(len(element) != 3 for element in self.output_values_distribution))
+                        or (np.array(self.output_values_distribution).ndim == 1 and len(self.output_values_distribution) != 3)):
+                    logger.warning(f"Insufficient values in distribution rel_V_pu {self.output_values_distribution} In "
                                f"Controller {self.index}. Using set point 1 pu and min/max 0.9/1.1 pu\n")
                     equal_array = [1, 0.9, 1.1]
-                    self.output_distribution_values = self.output_distribution_values = np.tile(equal_array,
-                                                            (len(np.array(self.output_element_in_service)), 1))[0]
-                    output_distribution_values = np.array(self.output_distribution_values)  # forming limit arrays
+                    self.output_values_distribution = self.output_values_distribution = np.tile(equal_array,
+                                                                                                (len(np.array(self.output_element_in_service)), 1))[0]
+                    output_distribution_values = np.array(self.output_values_distribution)  # forming limit arrays
                     self.v_set_point_pu = np.atleast_2d(output_distribution_values)[:, 0]
                     self.v_min_pu = np.atleast_2d(output_distribution_values)[:, 1]
                     self.v_max_pu = np.atleast_2d(output_distribution_values)[:, 2]
                 output_distribution_values_in_service = None
-            else: output_distribution_values_in_service, self.output_distribution_values = None, None
-        elif getattr(self, 'output_distribution_values', None) is None:
-            if self.output_values_distribution == ControlModusEnum.set_Q or self.output_values_distribution == ControlModusEnum.imported:
-                if self.output_values_distribution == ControlModusEnum.set_Q:
-                    logger.warning(f'Reactive Power Distribution method "set_Q" needs values given to output_distribution_values '
+            else: output_distribution_values_in_service, self.output_values_distribution = None, None
+        elif getattr(self, 'output_values_distribution', None) is None:
+            if self.distribution_method == ControlModusEnum.set_Q or self.distribution_method == ControlModusEnum.imported:
+                if self.distribution_method == ControlModusEnum.set_Q:
+                    logger.warning(f'Reactive Power Distribution method "set_Q" needs values given to output_values_distribution '
                          f'in Controller {self.index}. Distributing the reactive power equally between all available output elements.\n')
-                else:#self.output_values_distribution == 'imported'
+                else:#self.distribution_method == 'imported'
                     logger.warning(f"Something went wrong while importing output distribution values in Controller"
                          f" {self.index}. Distributing the reactive power equally between all available output elements.\n")
                 equal = 1 / sum(np.array(self.output_element_in_service))
-                self.output_distribution_values = np.full(len(np.array(self.output_element_in_service)), equal)
-                output_distribution_values_in_service = self.output_distribution_values[np.array(self.output_element_in_service)]  #only distributing between active output elements
-            elif self.output_values_distribution == ControlModusEnum.rel_V_pu:
+                self.output_values_distribution = np.full(len(np.array(self.output_element_in_service)), equal)
+                output_distribution_values_in_service = self.output_values_distribution[np.array(self.output_element_in_service)]  #only distributing between active output elements
+            elif self.distribution_method == ControlModusEnum.rel_V_pu:
                 logger.warning(f"Missing values for output distribution values 'rel_V_pu in Controller {self.index}. "
                              f"Using set point 1 pu and min/max 0.9/1.1 pu\n ")
                 equal_array = [1, 0.9, 1.1]
-                self.output_distribution_values = self.output_distribution_values = np.tile(equal_array,
-                                                        (len(np.array(self.output_element_in_service)), 1))[0]#new vals
-                output_distribution_values = np.atleast_2d(self.output_distribution_values)  # forming limit arrays
+                self.output_values_distribution = self.output_values_distribution = np.tile(equal_array,
+                                                                                            (len(np.array(self.output_element_in_service)), 1))[0]#new vals
+                output_distribution_values = np.atleast_2d(self.output_values_distribution)  # forming limit arrays
                 self.v_set_point_pu = output_distribution_values[:, 0]
                 self.v_min_pu = output_distribution_values[:, 1]
                 self.v_max_pu = output_distribution_values[:, 2]
                 output_distribution_values_in_service = None
-            else: self.output_distribution_values, output_distribution_values_in_service = None, None#rel_rated_S and rel_P, max_Q
-        else: raise UserWarning(f"Output_distribution_values in Controller {self.index} is {self.output_distribution_values}")
+            else: self.output_values_distribution, output_distribution_values_in_service = None, None#rel_rated_S and rel_P, max_Q
+        else: raise UserWarning(f"Output_values_destribution in Controller {self.index} is {self.output_values_distribution}")
 
         ###calculate output values###
         if self.output_values_old is None:  # first step
@@ -781,7 +776,7 @@ class BinarySearchControl(Controller):
             np.atleast_1d(self.output_values)[self.output_element_in_service] + 1e-3)
             positions_not_adjustable = [i for i, val in enumerate(self.output_adjustable) if not val]
             for i in positions_not_adjustable:
-                if np.atleast_1d(self.output_values_distribution)[i] == 0 or not self.output_element_in_service[i]:
+                if np.atleast_1d(self.distribution_method)[i] == 0 or not self.output_element_in_service[i]:
                     self.output_values[i] = 0
                 else:
                     continue
@@ -794,15 +789,15 @@ class BinarySearchControl(Controller):
                 x[np.where((abs(x) > abs(100 - abs(self.output_values))))[0]] = np.sign(x[np.where((abs(x) -
                                                                            abs(2 * self.output_values)) > 100)[0]]) * 100
             ###calculate the distribution of the output values
-            if self.output_values_distribution == ControlModusEnum.imported: #when importing net from PF for backwards compatibility
+            if self.distribution_method == ControlModusEnum.imported: #when importing net from PF for backwards compatibility
                 distribution = output_distribution_values_in_service
 
-            elif self.output_values_distribution == ControlModusEnum.rel_P: #proportional to the dispatch active power
+            elif self.distribution_method == ControlModusEnum.rel_P: #proportional to the dispatch active power
                 dispatched_active_power = read_from_net(net, self.output_element, self.output_element_index, 'p_mw', 'auto')
                 dispatched_active_power = dispatched_active_power[np.array(self.output_element_in_service)]
                 distribution = dispatched_active_power/sum(dispatched_active_power)
 
-            elif self.output_values_distribution == ControlModusEnum.rel_rated_S: #proportional to the rated apparent power
+            elif self.distribution_method == ControlModusEnum.rel_rated_S: #proportional to the rated apparent power
                 if not hasattr(self, 'rel_rated_S_warned'):
                     self.rel_rated_S_warned = True
                     logger.warning(f'The standard type attribute containing the rated apparent power for'
@@ -825,10 +820,10 @@ class BinarySearchControl(Controller):
                                     f'or specified rated apparent power, assuming 50 MVA\n')
                     distribution = np.full(np.sum(self.output_element_in_service), 50)
 
-            elif self.output_values_distribution == ControlModusEnum.set_Q: #individually set Q distribution
+            elif self.distribution_method == ControlModusEnum.set_Q: #individually set Q distribution
                 distribution = output_distribution_values_in_service
 
-            elif self.output_values_distribution == ControlModusEnum.max_Q:  # Maximise Reactive Reserve
+            elif self.distribution_method == ControlModusEnum.max_Q:  # Maximise Reactive Reserve
                 #only consider active sgens who are within their limits
                 generators_not_at_limit = (x <= np.array(self.max_q_mvar)[self.output_element_in_service]) \
                                           & (x >= np.array(self.min_q_mvar)[self.output_element_in_service])
@@ -857,7 +852,7 @@ class BinarySearchControl(Controller):
                 else:
                     distribution = q_max_q
 
-            elif self.output_values_distribution == ControlModusEnum.rel_V_pu:  # Voltage set point Adaptation
+            elif self.distribution_method == ControlModusEnum.rel_V_pu:  # Voltage set point Adaptation
                 if len(np.atleast_1d(self.output_element_in_service)) > 1 or sum(
                         np.atleast_1d(self.output_element_in_service)) > 1:#only for multiple elements
                     ###check for multiple output elements who influence the busbar###
@@ -947,19 +942,19 @@ class BinarySearchControl(Controller):
                 else: distribution = np.array([1]) #distribution is one for one active output element
 
             else: #unrecognizable output values distribution, using set_Q
-                if (((isinstance(self.output_values_distribution, list) or isinstance(self.output_values_distribution, np.ndarray))
-                    and all(isinstance(x, numbers.Number) for x in self.output_values_distribution)) or
-                        isinstance(self.output_values_distribution, numbers.Number)):#numbers
-                    logger.warning(f'Controller {self.index}: Output_values_distribution must be string from available methods'
+                if (((isinstance(self.distribution_method, list) or isinstance(self.distribution_method, np.ndarray))
+                    and all(isinstance(x, numbers.Number) for x in self.distribution_method)) or
+                        isinstance(self.distribution_method, numbers.Number)):#numbers
+                    logger.warning(f'Controller {self.index}: Distribution_method must be string from available methods'
                                    f' (rel_P, rel_rated_S, set_Q, max_Q or rel_V_pu). Using provided values with method set_Q\n')
-                    self.output_distribution_values = np.array(self.output_values_distribution)
-                    self.output_values_distribution = ControlModusEnum.set_Q
-                    distribution = self.output_distribution_values[np.array(self.output_element_in_service)]
+                    self.output_values_distribution = np.array(self.distribution_method)
+                    self.distribution_method = ControlModusEnum.set_Q
+                    distribution = self.output_values_distribution[np.array(self.output_element_in_service)]
                 else:
-                    raise NotImplementedError(f"Controller {self.index}: Reactive power distribution method {self.output_values_distribution}"
+                    raise NotImplementedError(f"Controller {self.index}: Reactive power distribution method {self.distribution_method}"
                                               f" not implemented available methods are (rel_P, rel_rated_S, set_Q, max_Q, rel_V_pu).")
             if self.output_element != 'gen':
-                if self.output_values_distribution == ControlModusEnum.max_Q: #max_Q and voltage gives the correct Qs for the gens
+                if self.distribution_method == ControlModusEnum.max_Q: #max_Q and voltage gives the correct Qs for the gens
                     if sum(np.atleast_1d(generators_not_at_limit)) == 0:
                         values = (sum(x) - sum(distribution)) / len(np.atleast_1d(distribution))
                         distribution = np.atleast_1d(distribution) + values #todo if respected Q limits only generators_not_at_limit, might not converge
@@ -968,8 +963,8 @@ class BinarySearchControl(Controller):
                         np.atleast_1d(distribution)[generators_not_at_limit] += values
                     x = distribution
                 #Voltage set point adaption gives correct Qs but needs convergence
-                elif (self.output_values_distribution == ControlModusEnum.rel_V_pu and (sum(np.atleast_1d(self.output_element_in_service)) > 1
-                    or sum(np.atleast_1d(self.output_element_in_service)) > 1)): #only when multiple elements
+                elif (self.distribution_method == ControlModusEnum.rel_V_pu and (sum(np.atleast_1d(self.output_element_in_service)) > 1
+                                                                                 or sum(np.atleast_1d(self.output_element_in_service)) > 1)): #only when multiple elements
                     x = distribution + (sum(x) - sum(distribution)) / len(distribution)
                 else: #percentile calculation
                     distribution = np.array(distribution, dtype=np.float64) / np.sum(abs(distribution))  # normalization
@@ -988,7 +983,7 @@ class BinarySearchControl(Controller):
 
                 sum_adjustable = sum(x) - sum(self.output_values[
                                                   positions_not_adjustable])  # stations that are still adjustable, rest of the power must be achieved
-                x[positions_adjustable] = sum_adjustable * self.output_values_distribution[positions_adjustable]
+                x[positions_adjustable] = sum_adjustable * self.distribution_method[positions_adjustable]
 
                 for i in positions_not_adjustable:
                     if self.output_element_in_service[i]:
@@ -997,8 +992,8 @@ class BinarySearchControl(Controller):
                         x[i] = 0  # reset value to 0 because station is out of service
 
             else:
-                if (not self.output_values_distribution == ControlModusEnum.max_Q and
-                        not self.output_values_distribution == ControlModusEnum.rel_V_pu):
+                if (not self.distribution_method == ControlModusEnum.max_Q and
+                        not self.distribution_method == ControlModusEnum.rel_V_pu):
                     x = sum(x) * distribution
 
             if self.output_adjustable is not None and net._options[
@@ -1027,13 +1022,13 @@ class BinarySearchControl(Controller):
                         max_q_mvar_limit = self.output_max_q_mvar[positions]
 
                         # adapt distribution and x
-                        self.output_distribution_values[positions] = 0
-                        if np.all(self.output_distribution_values == 0):
+                        self.output_values_distribution[positions] = 0
+                        if np.all(self.output_values_distribution == 0):
                             # all stations reached limit, prevent for division with 0 resulting in nan array
                             pass
                         else:
-                            self.output_distribution_values /= sum(self.output_distribution_values)
-                        x = (sum_old - sum(max_q_mvar_limit)) * self.output_distribution_values
+                            self.output_values_distribution /= sum(self.output_values_distribution)
+                        x = (sum_old - sum(max_q_mvar_limit)) * self.output_values_distribution
                         x[positions] = max_q_mvar_limit  # reset to limit
 
                     elif any(reached_min_qmvar):
@@ -1048,14 +1043,14 @@ class BinarySearchControl(Controller):
                         min_q_mvar_limit = self.output_min_q_mvar[positions]
 
                         # adapt distribution and x
-                        self.output_distribution_values[positions] = 0
-                        if np.all(self.output_distribution_values == 0):
+                        self.output_values_distribution[positions] = 0
+                        if np.all(self.output_values_distribution == 0):
                             # all stations reached limit, prevent for division with 0 resulting in nan array
                             pass
                         else:
-                            self.output_distribution_values /= sum(self.output_distribution_values)
+                            self.output_values_distribution /= sum(self.output_values_distribution)
 
-                        x = (sum_old - sum(min_q_mvar_limit)) * self.output_distribution_values
+                        x = (sum_old - sum(min_q_mvar_limit)) * self.output_values_distribution
                         x[positions] = min_q_mvar_limit  # reset to limit
 
                 else:
@@ -1130,21 +1125,21 @@ class BinarySearchControl(Controller):
     def _normalize_distribution_in_service(self, initial_pf_distribution=None):
         # normalize distribution depending on in service of stations
         if initial_pf_distribution is None:
-            if type(self.output_distribution_values) == str or getattr(self, 'output_distribution_values', None) is None:
+            if type(self.output_values_distribution) == str or getattr(self, 'output_values_distribution', None) is None:
                 distribution = np.ones(len(self.output_element_in_service))/len(self.output_element_in_service)
-            else: distribution = self.output_distribution_values
+            else: distribution = self.output_values_distribution
         else:
             distribution = initial_pf_distribution
 
         # normalize the values distribution
-        # set output_values_distribution to 0, if station is not in service
-        self.output_distribution_values = [0 if not in_service else value
-                       for in_service, value in zip(np.atleast_1d(self.output_element_in_service), np.atleast_1d(distribution))]
-        total = np.sum(self.output_distribution_values)
+        # set distribution_method to 0, if station is not in service
+        self.output_values_distribution = [0 if not in_service else value
+                                           for in_service, value in zip(np.atleast_1d(self.output_element_in_service), np.atleast_1d(distribution))]
+        total = np.sum(self.output_values_distribution)
         if total is not None and total > 0:  # To avoid division by zero
-            self.output_distribution_values = np.array(self.output_distribution_values, dtype=np.float64) / total
+            self.output_values_distribution = np.array(self.output_values_distribution, dtype=np.float64) / total
         else:
-            self.output_distribution_values = np.zeros_like(self.output_distribution_values, dtype=np.float64)
+            self.output_values_distribution = np.zeros_like(self.output_values_distribution, dtype=np.float64)
 
     def _update_min_max_q_mvar(self, net):
         if 'min_q_mvar' in net[self.output_element].columns:

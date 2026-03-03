@@ -634,7 +634,7 @@ def _update_object_attributes(obj):
         if "output_adjustable" not in obj.__dict__:
             obj.__dict__["output_adjustable"] = np.array([
                 False if not distribution else service for distribution, service in zip(
-                    obj.output_values_distribution, obj.output_element_in_service
+                    obj.output_values_distribution or [], obj.output_element_in_service
                 )
             ], dtype=bool)
         if "output_max_q_mvar" not in obj.__dict__:
@@ -699,8 +699,8 @@ def _update_station_controller(net):
             controller_attr.counter_warning = False
         if not hasattr(controller_attr, "overwrite_convergence") and controller_attr.__class__.__name__ == 'BinarySearchControl':
             controller_attr.overwrite_convergence = False
-        if not hasattr(controller_attr, "output_distribution_values") and controller_attr.__class__.__name__ == 'BinarySearchControl':
-            controller_attr.output_distribution_values = None
+        if not hasattr(controller_attr, "distribution_method") and controller_attr.__class__.__name__ == 'BinarySearchControl':
+            controller_attr.distribution_method = None
         if not hasattr(controller_attr, "min_q_mvar") and controller_attr.__class__.__name__ == 'BinarySearchControl':
             controller_attr.min_q_mvar = []
         if not hasattr(controller_attr, "max_q_mvar") and controller_attr.__class__.__name__ == 'BinarySearchControl':
