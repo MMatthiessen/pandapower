@@ -5,7 +5,9 @@ Change Log
 -------------------------------
 - [FIXED] cim2pp shift_lv_degree was translated from wrong entry
 - [FIXED] UnboundLocalError in _from_ppc_branch when creating impedance elements
-
+- [ADDED] LTDS support
+- [FIXED] cim2pp: CimConverter backwards-compatible (default value for cin_version)
+- [FIXED] jao converter: calculation of trafo parameters is based on primary side (hv) now
 
 [3.4.0] - 2026-02-09
 -------------------------------
