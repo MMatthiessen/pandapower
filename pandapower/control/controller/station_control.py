@@ -111,11 +111,12 @@ class BinarySearchControl(Controller):
     kwargs : dict, optional
         Additional keyword arguments.
     """
+
     def __init__(self, net, ctrl_in_service:bool, output_element, output_variable, output_element_index,
-                 output_element_in_service, input_element, input_variable, input_element_index, set_point:float,
-                 distribution_method:str = None, output_values_distribution = None, control_modus:str=None, name="",
-                 input_inverted=None, tol=0.001, in_service=True, order=0, level=0, drop_same_existing_ctrl=False,
-                 matching_params=None, **kwargs):
+                 output_element_in_service, input_element, input_variable,
+                 input_element_index, set_point:float, distribution_method:str=None, output_values_distribution = None,
+                 control_modus:str = None, name = "", input_inverted:list=None, tol=0.001, order=0, level=0,
+                 drop_same_existing_ctrl=False, matching_params=None, **kwargs):
         super().__init__(net, in_service=ctrl_in_service, order=order, level=level,
                          drop_same_existing_ctrl=drop_same_existing_ctrl,
                          matching_params=matching_params)
@@ -160,6 +161,9 @@ class BinarySearchControl(Controller):
             self.output_element_in_service = [output_element_in_service]
         else:
             self.output_element_in_service = output_element_in_service
+        if hasattr(self, 'output_distribution_values') and distribution_method is None:
+            distribution_method = self.output_distribution_values
+            del self.output_distribution_values
         if (isinstance(distribution_method, list)  #ruggedized code for miss input
             or isinstance(distribution_method, np.ndarray)) and isinstance(distribution_method[0], str):
             self.distribution_method = distribution_method[0]
@@ -172,7 +176,7 @@ class BinarySearchControl(Controller):
                 self.distribution_method = ControlModusEnum.set_Q
             else:
                 self.distribution_method = ControlModusEnum.rel_P
-         if input_element_index == 'auto':
+        if input_element_index == 'auto':
             self.automatic_selection(net)
         elif isinstance(input_element_index, list) or isinstance(input_element_index, np.ndarray):
             for element in input_element_index:
@@ -367,8 +371,8 @@ class BinarySearchControl(Controller):
         self._normalize_distribution_in_service(initial_pf_distribution=output_values_distribution)
         self._update_min_max_q_mvar(net)
         self.output_adjustable = np.array([service if distribution is None else (False if not distribution else service)
-                                          for distribution, service in zip(distribution_method,
-                                          self.output_element_in_service)],
+                                           for distribution, service in zip(distribution_method,
+                                                                            self.output_element_in_service)],
                                           dtype=np.bool)
         ###directions of q and inverted index
         n = len(self.input_element_index)
@@ -794,10 +798,12 @@ class BinarySearchControl(Controller):
                         logger.warning(f'Controller {self.index}: Generator {self.output_element} {self.output_element_index[i]}'
                             f' exceeded maximum Voltage at bus {self.bus_idx_dist[i]}: {vm_pu[i]} < {v_min_pu[i]}\n')
             if len(self.min_q_mvar) == len(self.max_q_mvar) == len(self.output_element_in_service):
-                exceed_limit_min = np.flatnonzero(np.atleast_1d(self.output_values)[np.atleast_1d(self.output_element_in_service)]
-                                                  < np.atleast_1d(self.min_q_mvar)[np.atleast_1d(self.output_element_in_service)])
-                exceed_limit_max = np.flatnonzero(np.atleast_1d(self.output_values)[np.atleast_1d(self.output_element_in_service)]
-                                                  > np.atleast_1d(self.max_q_mvar)[np.atleast_1d(self.output_element_in_service)])
+                exceed_limit_min = np.flatnonzero(
+                    np.atleast_1d(self.output_values)[np.atleast_1d(self.output_element_in_service)]
+                    < np.atleast_1d(self.min_q_mvar)[np.atleast_1d(self.output_element_in_service)])
+                exceed_limit_max = np.flatnonzero(
+                    np.atleast_1d(self.output_values)[np.atleast_1d(self.output_element_in_service)]
+                    > np.atleast_1d(self.max_q_mvar)[np.atleast_1d(self.output_element_in_service)])
                 for i in exceed_limit_max:
                     logger.warning(f'Controller {self.index} converged but the Reactive Power Output for Element '
                                    f'{self.output_element}: {self.output_element_index[i]} exceeds upper limits: {self.output_values[i]} > {self.max_q_mvar[i]}\n')
@@ -805,9 +811,10 @@ class BinarySearchControl(Controller):
                     logger.warning(f'Controller {self.index} converged but the Reactive Power Output for Element '
                                    f'{self.output_element}: {self.output_element_index[i]} falls short of lower limit: {self.output_values[i]} < {self.min_q_mvar[i]}\n')
             else:
-                logger.warning(f'Mismatching number of minimum and maximum limits of the output elements in Controller {self.index}.'
-                               f'Possible exceedance of output element {self.output_element}'
-                               f' {str(np.array(self.output_element_index))} limits\n')
+                logger.warning(
+                    f'Mismatching number of minimum and maximum limits of the output elements in Controller {self.index}.'
+                    f'Possible exceedance of output element {self.output_element}'
+                    f' {str(np.array(self.output_element_index))} limits\n')
                 self.diff = self.set_point - sum(input_values)
                 self.converged = np.all(np.abs(self.diff) < self.tol)
         ###check convergence of linked droop controller (if exists)
