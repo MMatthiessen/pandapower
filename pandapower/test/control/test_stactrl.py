@@ -81,7 +81,7 @@ def test_volt_ctrl_droop():
     runpp(net, run_control=True)
     assert(abs(net.res_bus.loc[1, "vm_pu"] - (1.02 + net.res_trafo.loc[0, "q_hv_mvar"] / 40)) < tol)
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
-    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'V_ctrl_Q_droop')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'V_ctrl_Q_droop')#test correct control_modus
     assert(getattr(net.controller.at[1, 'object'].control_modus, 'value', None) == 'V_ctrl_Q_droop')  # test correct control_modus
     assert(net.controller.at[1, 'object'].controller_idx == 0)  # test droop controller linkage
 
@@ -99,7 +99,7 @@ def test_qctrl():
     runpp(net, run_control=True)
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - 1.0) < tol)
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
-    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'Q_ctrl')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'Q_ctrl')# test correct control_modus
 
 
 def test_qctrl_imp_input():
@@ -216,7 +216,6 @@ def test_qlimits_with_capability_curve(v, p):
         'p_mw': [-2.0, -1.0, 0.0, 1.0, 2.0],
         'q_min_mvar': [-0.1, -0.1, -0.1, -0.1, -0.1],
         'q_max_mvar': [0.1, 0.1, 0.1, 0.1, 0.1]})
-
     net.sgen.at[0, "id_q_capability_characteristic"] = 0
     net.sgen['curve_style'] = "straightLineYValues"
     create_q_capability_characteristics_object(net)
@@ -328,11 +327,11 @@ def test_volt_ctrl_new():
     net = simple_test_net()
     tol = 1e-6
     BinarySearchControl(net, ctrl_in_service=True,
-                                   output_element="sgen", output_variable="q_mvar", output_element_index=0,
-                                   output_element_in_service=True, output_values_distribution=1,
-                                   output_distribution_values = 2,
-                                   input_element="res_bus", input_variable="vm_pu", input_element_index=1,
-                                   set_point=1.02,control_modus='V_ctrl', tol=tol, bus_idx = 1)
+                        output_element="sgen", output_variable="q_mvar", output_element_index=0,
+                        output_element_in_service=True, distribution_method='rel_P',
+                        output_values_distribution= 2,
+                        input_element="res_bus", input_variable="vm_pu", input_element_index=1,
+                        set_point=1.02, control_modus='V_ctrl', tol=tol, bus_idx = 1)
     runpp(net, run_control=False)
     assert(abs(net.res_bus.loc[1, "vm_pu"] - 0.999648) < tol)
     runpp(net, run_control=True)
@@ -346,7 +345,7 @@ def test_volt_ctrl_droop_new():
     tol = 1e-6
     bsc = BinarySearchControl(net, ctrl_in_service=True,
                                          output_element="sgen", output_variable="q_mvar", output_element_index=0,
-                                         output_element_in_service=True, output_values_distribution=1,
+                                         output_element_in_service=True, distribution_method='rel_rated_S',
                                          input_element="res_trafo", input_variable="q_hv_mvar", input_element_index=0,
                                          set_point=1.02,control_modus = 'V_ctrl_Q_droop', tol=tol, bus_idx =1)
     DroopControl(net, q_droop_mvar=40, controller_idx=bsc.index, control_modus = "V_ctrl_Q_droop", input_element_q_meas='res_trafo',
@@ -356,8 +355,8 @@ def test_volt_ctrl_droop_new():
     runpp(net, run_control=True)
     assert(abs(net.res_bus.loc[1, "vm_pu"] - (1.02 + net.res_trafo.loc[0, "q_hv_mvar"] / 40)) < tol)
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
-    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'V_ctrl_Q_droop')  # test correct control_modus
-    assert(getattr(net.controller.at[1, 'object'].control_modus, 'value', None) == 'V_ctrl_Q_droop')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'V_ctrl_Q_droop')# test correct control_modus
+    assert(getattr(net.controller.at[1, 'object'].control_modus, 'value', None) == 'V_ctrl_Q_droop')# test correct control_modus
     assert(net.controller.at[1, 'object'].controller_idx == 0)  # test droop controller linkage
 
 
@@ -365,10 +364,10 @@ def test_qctrl_new():
     net = simple_test_net()
     tol = 1e-6
     BinarySearchControl(net, ctrl_in_service=True, output_element="sgen", output_variable="q_mvar",
-                                   output_element_index=0, output_element_in_service=True,
-                                   output_values_distribution=1, input_element="res_line",
-                                   damping_factor=0.9, input_variable=["q_to_mvar"], output_distribution_values= [0.2, 0.3],
-                                   input_element_index=0, set_point=1,control_modus = 'Q_ctrl', tol=1e-6)
+                        output_element_index=0, output_element_in_service=True,
+                        distribution_method='set_Q', input_element="res_line",
+                        damping_factor=0.9, input_variable=["q_to_mvar"], output_values_distribution= [0.2, 0.3],
+                        input_element_index=0, set_point=1, control_modus = 'Q_ctrl', tol=1e-6)
     runpp(net, run_control=False)
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - (-6.092016e-12)) < tol)
     runpp(net, run_control=True)
@@ -382,10 +381,10 @@ def test_qctrl_droop_new():
     tol = 1e-6
     net.load.loc[0, "p_mw"] = 60  # create voltage drop at bus 1
     bsc = BinarySearchControl(net, ctrl_in_service=True,
-                                         output_element="sgen", output_variable="q_mvar", output_element_index=0,
-                                         output_element_in_service=True, output_values_distribution=1,
-                                         input_element="res_line", damping_factor=0.9, input_variable="q_to_mvar",
-                                         input_element_index=0, set_point=1,control_modus = 'Q_ctrl_V_droop', tol=1e-6)
+                              output_element="sgen", output_variable="q_mvar", output_element_index=0,
+                              output_element_in_service=True, distribution_method='max_Q',
+                              input_element="res_line", damping_factor=0.9, input_variable="q_to_mvar",
+                              input_element_index=0, set_point=1, control_modus = 'Q_ctrl_V_droop', tol=1e-6)
     DroopControl(net, q_droop_mvar=40, bus_idx=1,
                  vm_set_pu=1, vm_set_ub=1.005, vm_set_lb=0.995,
                  controller_idx=bsc.index, control_modus='Q_ctrl_V_droop')
@@ -395,18 +394,18 @@ def test_qctrl_droop_new():
     assert(abs(net.res_line.loc[0, "q_to_mvar"] - (1 + (0.995 - net.res_bus.loc[1, "vm_pu"]) * 40)) < tol)
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'Q_ctrl_V_droop')# test correct control_modus
-    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'Q_ctrl_V_droop')   # test correct control_modus
+    assert(getattr(net.controller.at[1, 'object'].control_modus, 'value', None) == 'Q_ctrl_V_droop')   # test correct control_modus
     assert(net.controller.at[1, 'object'].controller_idx == 0)  # test droop controller linkage
 
 def test_pf_control_cap():
     net = simple_test_net()
     tol = 1e-6
     BinarySearchControl(net, ctrl_in_service=True, output_element='sgen', output_variable='q_mvar',
-                                         output_element_index=0, output_values_distribution=1,
-                                         input_element='res_line', output_element_in_service=True,
-                                         damping_factor = 0.9, input_variable='q_to_mvar', input_element_index=0,
-                                         set_point = 0.7, tol = 1e-6,control_modus = 'PF_ctrl_cap',
-                                         output_distribution_values=[1, 0.9, 1.1])
+                        output_element_index=0, distribution_method='rel_V_pu',
+                        input_element='res_line', output_element_in_service=True,
+                        damping_factor = 0.9, input_variable='q_to_mvar', input_element_index=0,
+                        set_point = 0.7, tol = 1e-6, control_modus = 'PF_ctrl_cap',
+                        output_values_distribution=[1, 0.9, 1.1])
     runpp(net, run_control=False)
     assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"] / net.res_line.loc[0, 'p_to_mw']) + 0.7953988 - np.arccos(0.7)) < tol)
     runpp(net, run_control = True)
@@ -419,17 +418,17 @@ def test_pf_control_ind():
     net = simple_test_net()
     tol = 1e-6
     BinarySearchControl(net, ctrl_in_service=True, output_element='sgen', output_variable='q_mvar',
-                                         output_element_index=0, output_values_distribution=1,
-                                         input_element='res_line', output_element_in_service=True,
-                                         damping_factor = 0.9, input_variable='q_to_mvar', input_element_index=0,
-                                         set_point = 0.7, tol = 1e-6,control_modus = 'PF_ctrl_ind',
-                                         output_distribution_values=[1, 0.9, 1.1])
+                        output_element_index=0, distribution_method='max_Q',
+                        input_element='res_line', output_element_in_service=True,
+                        damping_factor = 0.9, input_variable='q_to_mvar', input_element_index=0,
+                        set_point = 0.7, tol = 1e-6, control_modus = 'PF_ctrl_ind',
+                        output_values_distribution=[1, 0.9, 1.1])
     runpp(net, run_control=False)
     assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"] / net.res_line.loc[0, 'p_to_mw']) + 0.7953988 - np.arccos(0.7)) < tol)
     runpp(net, run_control = True)
-    assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"]/net.res_line.loc[0, 'p_to_mw']) - np.arccos(0.7)) < tol)  # positive means inductive
+    assert(abs(np.arctan(net.res_line.loc[0, "q_to_mvar"]/net.res_line.loc[0, 'p_to_mw']) - np.arccos(0.7)) < tol)#positive means inductive
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
-    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'PF_ctrl_ind')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'PF_ctrl_ind')# test correct control_modus
 
 def test_pf_control_droop_p():
     net = simple_test_net()
@@ -481,15 +480,15 @@ def test_tan_phi_control():
     net = simple_test_net()
     tol = 1e-6
     BinarySearchControl(net, ctrl_in_service= True, output_element='sgen', output_variable='q_mvar',
-                         output_element_index= 0, output_element_in_service= True, output_values_distribution=1,
-                         input_element='res_trafo', input_variable='q_lv_mvar', input_element_index=0, control_modus='tan_phi_ctrl',
-                                         tol = 1e-6, set_point=2)
+                        output_element_index= 0, output_element_in_service= True, distribution_method='rel_P',
+                        input_element='res_trafo', input_variable='q_lv_mvar', input_element_index=0, control_modus='tan_phi_ctrl',
+                        tol = 1e-6, set_point=2)
     runpp(net, run_control=False)
     assert(abs(net.res_trafo.loc[0, "q_lv_mvar"] / net.res_trafo.loc[0, 'p_lv_mw'] - 0.097382) < tol)
     runpp(net, run_control=True)
     assert(abs(net.res_trafo.loc[0, "q_lv_mvar"] / net.res_trafo.loc[0, 'p_lv_mw'] - 2) < tol)
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
-    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'tan_phi_ctrl')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'tan_phi_ctrl')   # test correct control_modus
 
 def test_station_ctrl_pf_import_new():
     path = os.path.join(pp_dir, 'test', 'control', 'testfiles', 'station_ctrl_test_new.json')
@@ -606,7 +605,8 @@ def test_q_relative_to_p_dist():
         net.sgen.at[0, 'p_mw'] + net.sgen.at[1, 'p_mw'])) < tol)
     assert(abs(net.sgen.at[1, 'q_mvar'] / (net.sgen.at[0, 'q_mvar'] + net.sgen.at[1, 'q_mvar'])-net.sgen.at[1, 'p_mw']/(
         net.sgen.at[0, 'p_mw'] + net.sgen.at[1, 'p_mw'])) < tol)
-    assert (getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'V_ctrl')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'V_ctrl')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].distribution_method, 'value', None) == 'rel_P')
 
 def test_q_relative_to_rated_s_dist(): #rated p is not implemented and defaults to 50 MVar => 50/50
     net = distribution_test_net()
@@ -624,6 +624,7 @@ def test_q_relative_to_rated_s_dist(): #rated p is not implemented and defaults 
     assert(net.sgen.at[0, 'q_mvar'] / net.sgen.at[0, 'sn_mva'] == net.sgen.at[1, 'q_mvar'] / net.sgen.at[1, 'sn_mva'])
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'Q_ctrl')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].distribution_method, 'value', None) == 'rel_rated_S')
 
 def test_set_q_dist():
     net = distribution_test_net()
@@ -640,6 +641,7 @@ def test_set_q_dist():
     assert(abs(net.sgen.at[1, 'q_mvar'] / (net.sgen.at[0, 'q_mvar'] + net.sgen.at[1, 'q_mvar']) - 0.8 / (0.5 + 0.8)) < tol)
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'PF_ctrl_ind')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].distribution_method, 'value', None) == 'set_Q')
 
 def test_max_q():
     net = distribution_test_net()
@@ -686,7 +688,8 @@ def test_max_q():
            abs(net.sgen.at[idx_pos[1], 'q_mvar']) < abs(net.sgen.at[idx_pos[2], 'q_mvar']))
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'PF_ctrl_cap')  # test correct control_modus
-#todo
+    assert (getattr(net.controller.at[0, 'object'].distribution_method, 'value', None) == 'max_Q')
+
 def test_rel_v_pu():
     net = distribution_test_net()
     tol = 0.02 #voltage adaption is not very precise
@@ -712,6 +715,7 @@ def test_rel_v_pu():
                 - 0.98 - 0.89) < tol) #now at set points
     assert(all(net.controller.object[i].converged == True for i in net.controller.index))
     assert(getattr(net.controller.at[0, 'object'].control_modus, 'value', None) == 'tan(phi)_ctrl')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].distribution_method, 'value', None) == 'rel_V_pu')
 
 def test_station_ctrl_pf_import_distributions():#test comparability between PF and pp
     path = os.path.join(pp_dir, 'test', 'control', 'testfiles', 'station_ctrl_test_distributions.json')
@@ -737,12 +741,19 @@ def test_station_ctrl_pf_import_distributions():#test comparability between PF a
     assert(getattr(net.controller.at[2, 'object'].control_modus, 'value', None) == 'PF_ctrl_ind')  # test correct control_modus
     assert(getattr(net.controller.at[3, 'object'].control_modus, 'value', None) == 'PF_ctrl_cap')  # test correct control_modus
     assert(getattr(net.controller.at[4, 'object'].control_modus, 'value', None) == 'tan_phi_ctrl')  # test correct control_modus
+    assert(getattr(net.controller.at[0, 'object'].distribution_method, 'value', None) == 'set_Q')
+    assert(getattr(net.controller.at[1, 'object'].distribution_method, 'value', None) == 'rel_rated_S')
+    assert(getattr(net.controller.at[2, 'object'].distribution_method, 'value', None) == 'rel_P')
+    assert(getattr(net.controller.at[3, 'object'].distribution_method, 'value', None) == 'max_Q')
+    assert(getattr(net.controller.at[4, 'object'].distribution_method, 'value', None) == 'rel_V_pu')
+
 ##Todo
 def test_q_limits_with_set_q_and_rel_p_and_rel_rated_s_distribution():
     pass
 
 def test_q_limits_with_max_q_and_rel_v_pu_distribution():
     pass
+#todo test distributions with enabled q_lims
 
 if __name__ == '__main__':
     pytest.main(['-s', __file__])

@@ -1,19 +1,21 @@
 import numbers
 from cmath import isnan
 import numpy as np
+from enum import Enum
 from collections.abc import Sequence
 from scipy.optimize import minimize
 from pandapower import create_gen, create_sgen
+import pandas as pd
 from pandas import concat
 from pandapower.control.basic_controller import Controller
 from pandapower.auxiliary import _detect_read_write_flag, read_from_net, write_to_net
 from pandapower.control.util.auxiliary import get_min_max_q_mvar_from_characteristics_object
-from enum import Enum
 import logging
 import pandapower.topology as top
 import networkx as nx
 
 logger = logging.getLogger(__name__)
+
 
 class BinarySearchControl(Controller):
     """
@@ -22,7 +24,7 @@ class BinarySearchControl(Controller):
     the control_modus parameter. Input and output elements and indexes can be lists. Input elements can be transformers,
     switches, lines or buses (only in case of voltage control). In case of voltage control, the controlled bus must be
     given to input_element_index. Output elements are sgens, where active and reactive power can be set. The
-    output value distribution takes a string and selects the type of reactive power distribution.
+    distribution_method takes a string and selects the type of reactive power distribution.
     The output distribution value describes the distribution of reactive power provision between multiple
     "output_elements" and will be normalized to 100 % (1).
 
@@ -42,8 +44,17 @@ class BinarySearchControl(Controller):
         Index or list of indices of the output element(s) in net (e.g. ``"net.sgen"``).
     output_element_in_service : bool or list of bool
         Indicates whether each output element is in service.
+    distribution_method : str -> ControlModusEnum
+        Takes string to select one of the different available reactive power distribution
+        methods: 'rel_P' -Q is relative to used Power, 'rel_rated_S' -Q is relative to the rated power S, currently
+        using the sgen attribute 'sn_mva', 'set_Q' -set individual reactive power for each output element,
+        'max_Q' -maximized reactive power reserve for the output elements, 'rel_V_pu' -Q is relative to the voltage
+        limits of the output element.
     output_values_distribution : int, float or list of float
-        Distribution of reactive power provision among output elements (must sum to 1).
+        The values of the Q distribution, only applicable if distribution_method = 'set_Q' or rel_V_pu.
+        For 'set_Q': list of floats - Distribution of reactive power provision among output elements (must sum to 1).
+        For 'rel_V_pu': list of lists - Must be a list containing lists
+        [Target Voltage, minimal allowed Voltage, maximal allowed Voltage] for each output element.
     input_element : str
         Measurement location, can be a transformer, switches or lines. Must be a bus for
         ``"V_ctrl"``. Indicated by string value ``"res_trafo"``, ``"res_switch"``, ``"res_line"`` or ``"res_bus"``.
@@ -55,11 +66,7 @@ class BinarySearchControl(Controller):
         Indicates whether the measurement of each input element must be inverted.
         Required when importing from PowerFactory.
     input_element_index : int or list of int
-        Element of input element in net. Controlled bus in case of Voltage control. Can be
-        given the string ``"auto"`` in control_modus ``"V_ctrl"`` to automatically select a bus whose nominal voltage is >= X kV.
-        The X must be given to set_point. Will take target voltage of the encountered bus. If no bus is found,
-        uses the bus next to the controlled generator group. Not completely implemented, generators on multiple buses
-        are not correctly handled.
+        Element of input element in net.
     control_modus : str -> ControlModusEnum:
         Enables the selection of the available control modi by taking one of the strings: ``"Q_ctrl"``, ``"V_ctrl"``,
         ``"PF_ctrl_ind"`` or ``"PF_ctrl_cap"`` for power factor control with reactance or ``"tan_phi_ctrl"``.
@@ -104,12 +111,11 @@ class BinarySearchControl(Controller):
     kwargs : dict, optional
         Additional keyword arguments.
     """
-
     def __init__(self, net, ctrl_in_service:bool, output_element, output_variable, output_element_index,
-                 output_element_in_service, input_element, input_variable,
-                 input_element_index, set_point:float, distribution_method:str, output_values_distribution = None,
-                 control_modus:str = None, name = "", input_inverted:list=None, gen_q_response:list=None, tol=0.001, order=0, level=0,
-                 drop_same_existing_ctrl=False, matching_params=None, **kwargs):
+                 output_element_in_service, input_element, input_variable, input_element_index, set_point:float,
+                 distribution_method:str = None, output_values_distribution = None, control_modus:str=None, name="",
+                 input_inverted=None, tol=0.001, in_service=True, order=0, level=0, drop_same_existing_ctrl=False,
+                 matching_params=None, **kwargs):
         super().__init__(net, in_service=ctrl_in_service, order=order, level=level,
                          drop_same_existing_ctrl=drop_same_existing_ctrl,
                          matching_params=matching_params)
@@ -144,7 +150,6 @@ class BinarySearchControl(Controller):
                                                                         output_variable)
         ###catching errors in variables, allocating
         if input_inverted is None: input_inverted = []#for robustness
-        if gen_q_response is None: gen_q_response = []#robustness and legacy
         if isinstance(output_element_index, list) or isinstance(output_element_index, np.ndarray):
             self.output_element_index = [int(item) for item in output_element_index]
         else:
@@ -158,14 +163,16 @@ class BinarySearchControl(Controller):
         if (isinstance(distribution_method, list)  #ruggedized code for miss input
             or isinstance(distribution_method, np.ndarray)) and isinstance(distribution_method[0], str):
             self.distribution_method = distribution_method[0]
-        else:
-            try:
-                self.distribution_method = ControlModusEnum(distribution_method)
-            except ValueError:
-                logger.warning(f"Control_modus {distribution_method} not recognized, using 'rel_P' from available"
-                               f" types 'rel_P', 'max_Q', 'set_Q', 'rel_V_pu' or 'rel_rated_S'\n")
+        try:
+            self.distribution_method = ControlModusEnum(distribution_method)
+        except ValueError:
+            logger.warning(f"Control_modus {getattr(self, 'distribution_method', None)} not recognized,"
+                           f" using 'rel_P' from available types 'rel_P', 'max_Q', 'set_Q', 'rel_V_pu' or 'rel_rated_S'\n")
+            if self.output_values_distribution is not None:
+                self.distribution_method = ControlModusEnum.set_Q
+            else:
                 self.distribution_method = ControlModusEnum.rel_P
-        if input_element_index == 'auto':
+         if input_element_index == 'auto':
             self.automatic_selection(net)
         elif isinstance(input_element_index, list) or isinstance(input_element_index, np.ndarray):
             for element in input_element_index:
@@ -173,6 +180,44 @@ class BinarySearchControl(Controller):
         else:
             self.input_element_index.append(input_element_index)
 
+        if self.tol is None: #old order
+            self.tol = 0.001
+        ###allocating distribution method and distribution values
+        if self.distribution_method == ControlModusEnum.rel_V_pu:
+            self.bus_idx_dist = []  # initializing bus idx
+            output_values_distribution = np.array(self.output_values_distribution)  # forming limit arrays
+            if output_values_distribution.ndim == 1:  # one controlled sgen
+                try:
+                    self.v_set_point_pu = np.array(output_values_distribution)[0]
+                    self.v_min_pu = np.minimum(np.array(output_values_distribution)[1],
+                                               np.array(output_values_distribution)[2])
+                    self.v_max_pu = np.maximum(np.array(output_values_distribution)[1], np.array(output_values_distribution)[2])
+                except IndexError: #insufficient values in array
+                    logger.warning(f"Insufficient values in distribution rel_V_pu {self.output_values_distribution} In "
+                                   f"Controller {self.index}. Using set point 1 pu and min/max 0.9/1.1 pu\n")
+                    equal_array = [1, 0.9, 1.1]
+                    self.output_values_distribution = np.tile(equal_array, (len(np.array(self.output_element_in_service)), 1))[0]
+                    output_values_distribution = np.array(self.output_values_distribution)  # forming limit arrays
+                    self.v_set_point_pu = output_values_distribution[0]
+                    self.v_min_pu = output_values_distribution[1]
+                    self.v_max_pu = output_values_distribution[2]
+
+        ###Q direction at element
+        n = len(self.input_element_index)
+        if input_inverted is None or (isinstance(input_inverted, Sequence) and len(input_inverted) == 0):
+            # empty, then set all entries to 1
+            self.input_sign = [1] * n
+        elif isinstance(input_inverted, bool):
+            # single bool, then set all entries to desired value +/-1
+            self.input_sign = ([-1] if input_inverted else [1]) * n
+        else:
+            inv_list = list(np.atleast_1d(input_inverted))[:n]
+            if len(inv_list) < n:
+                inv_list += [False] * (n - len(inv_list))
+            self.input_sign = [-1 if inv else 1 for inv in inv_list]
+        self.output_element = output_element
+        self.output_element_index = output_element_index
+        self.output_element_in_service = output_element_in_service
         if self.tol is None: #old order
             self.tol = 0.001
         ###allocating distribution method and distribution values
@@ -211,6 +256,18 @@ class BinarySearchControl(Controller):
                     self.v_max_pu = output_values_distribution[:, 2]
             else:
                 self.output_values_distribution = None
+        # normalize the values distribution:
+        self._normalize_distribution_in_service(initial_pf_distribution=output_values_distribution)
+        if self.distribution_method == ControlModusEnum.rel_V_pu:
+            self.output_adjustable = np.array([
+                                service if distribution is None else (False if not distribution else service)
+                                for distribution, service in zip(np.atleast_1d(np.atleast_2d(
+                                    self.output_values_distribution)[0][0]), np.atleast_1d(self.output_element_in_service))],
+                                dtype=np.bool)
+        else: #rel_V_pu has arrays as output_values_distribution
+            self.output_adjustable = np.array([False if not distribution else service
+                                            for distribution, service in zip(list(np.atleast_1d(self.output_values_distribution)),
+                                                list(np.atleast_1d(self.output_element_in_service)))], dtype=bool)
         ###finding correct control_modus, catching deprecated voltage_ctrl argument###
         if control_modus is None: #catching old attribute voltage_ctrl
             if hasattr(self, 'voltage_ctrl'):
@@ -224,7 +281,7 @@ class BinarySearchControl(Controller):
             self.control_modus = ControlModusEnum.v_ctrl
             logger.warning(f"Deprecated Controller control_modus for Controller {self.index}, using 'V_ctrl' from available"
                          f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan_phi_ctrl'\n")
-        elif type(control_modus) == bool and control_modus == False: #Only functions written out!?!
+        elif isinstance(control_modus, bool) and control_modus == False: #Only functions written out!?!
             self.control_modus = ControlModusEnum.q_ctrl
             logger.warning(f"Deprecated Controller control_modus for Controller {self.index}, using Q_ctrl from available"
                          f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan_phi_ctrl'\n")
@@ -235,16 +292,16 @@ class BinarySearchControl(Controller):
                 logger.warning(f"Control_modus {control_modus} not recognized, using 'Q_ctrl' from available"
                                f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan_phi_ctrl'\n")
                 self.control_modus = ControlModusEnum.q_ctrl
-        if self.control_modus == ControlModusEnum.PF_ctrl_cap: #-1 for capacitive, 1 for inductive systems
-            self.reactance= -1
-        else:
-            if control_modus == ControlModusEnum.PF_ctrl:
-                logger.warning(
-                    f"Ambivalent reactive power flow direction for Controller {self.index}, using inductive direction.\n")
-                self.control_modus = ControlModusEnum.PF_ctrl_ind
-            self.reactance = 1
+        if self.control_modus in ControlModusEnum.pf_modes():  # checking cos(phi) limits
+            if self.control_modus == ControlModusEnum.PF_ctrl_cap: #-1 for capacitive, 1 for inductive systems
+                self.reactance= -1
+            else:
+                if control_modus == ControlModusEnum.PF_ctrl:
+                    logger.warning(
+                        f"Ambivalent reactive power flow direction for Controller {self.index}, using inductive direction.\n")
+                    self.control_modus = ControlModusEnum.PF_ctrl_ind
+                self.reactance = 1
 
-        if self.control_modus in ControlModusEnum.pf_modes(): #checking cos(phi) limits
             if abs(self.set_point) > 1:
                 raise UserWarning(f'Power Factor Controller {self.index}: Set point out of range ([-1,1]')
         ###adding input elements###
@@ -284,7 +341,7 @@ class BinarySearchControl(Controller):
             counter += 1
 
         ###reading Q limits###
-        for output_index in self.output_element_index:
+        for output_index in np.atleast_1d(self.output_element_index):
             try:
                 min_q = read_from_net(net, self.output_element, output_index, 'min_q_mvar', 'single_index')
                 assert(np.isnan(min_q) == False) # error if nan
@@ -310,8 +367,8 @@ class BinarySearchControl(Controller):
         self._normalize_distribution_in_service(initial_pf_distribution=output_values_distribution)
         self._update_min_max_q_mvar(net)
         self.output_adjustable = np.array([service if distribution is None else (False if not distribution else service)
-                                           for distribution, service in zip(distribution_method,
-                                                                            self.output_element_in_service)],
+                                          for distribution, service in zip(distribution_method,
+                                          self.output_element_in_service)],
                                           dtype=np.bool)
         ###directions of q and inverted index
         n = len(self.input_element_index)
@@ -326,14 +383,6 @@ class BinarySearchControl(Controller):
             if len(inv_list) < n:
                 inv_list += [False] * (n - len(inv_list))
             self.input_sign = [-1 if inv else 1 for inv in inv_list]
-        n = len(self.output_element_index)
-        if gen_q_response is None or (isinstance(gen_q_response, Sequence) and len(gen_q_response) == 0):
-            # empty, then set all entries to 1
-            self.gen_Q_response = [1] * n
-        else:
-            if len(gen_q_response) < n:
-                gen_q_response += [1] * (n - len(gen_q_response))  # missing entries with +1
-            self.gen_Q_response = gen_q_response
 
     def __str__(self):
         return super().__str__() + " [%s.%s.%s.%s]" % (
@@ -368,9 +417,9 @@ class BinarySearchControl(Controller):
                     or isinstance(self.output_element_in_service[0], (bool, np.bool_))) \
                     else np.atleast_1d(self.output_element_in_service)[:, 0].tolist()
         try:
-            self.distribution_method = ControlModusEnum(self.distribution_method)
+            self.distribution_method = ControlModusEnum(getattr(self, 'distribution_method', None))
         except ValueError:
-            logger.warning(f"Control_modus {self.distribution_method} not recognized, using 'rel_P' from available"
+            logger.warning(f"Control_modus {getattr(self, 'distribution_method', None)} not recognized, using 'rel_P' from available"
                            f" types 'rel_P', 'max_Q', 'set_Q', 'rel_V_pu' or 'rel_rated_S'\n")
             self.distribution_method = ControlModusEnum.rel_P
         if (self.control_modus in ControlModusEnum.v_modes() and self.output_element == 'gen' and
@@ -442,8 +491,8 @@ class BinarySearchControl(Controller):
             self.output_adjustable = np.array([
                 service if distribution is None else (False if not distribution else service)
                 for distribution, service in zip(
-                    np.atleast_1d(self.output_values_distribution),
-                    np.atleast_1d(self.output_element_in_service)
+                    list(np.atleast_1d(self.output_values_distribution)),
+                    list(np.atleast_1d(self.output_element_in_service))
                 )
             ], dtype=bool)
 
@@ -457,7 +506,22 @@ class BinarySearchControl(Controller):
             self.converged = True
             return self.converged
         ###legacy before ControlModusEnum
-        if type(self.control_modus) == str:
+        if isinstance(self.control_modus,bool) and self.control_modus == True: #Only functions written out!?!
+            self.control_modus = ControlModusEnum.v_ctrl
+            logger.warning(f"Deprecated Controller control_modus for Controller {self.index}, using 'V_ctrl' from available"
+                         f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan_phi_ctrl'\n")
+        elif isinstance(self.control_modus, bool) and self.control_modus == False: #Only functions written out!?!
+            self.control_modus = ControlModusEnum.q_ctrl
+            logger.warning(f"Deprecated Controller control_modus for Controller {self.index}, using Q_ctrl from available"
+                         f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan_phi_ctrl'\n")
+        else:
+            try:
+                self.control_modus = ControlModusEnum(self.control_modus)
+            except ValueError:
+                logger.warning(f"Control_modus {self.control_modus} not recognized, using 'Q_ctrl' from available"
+                               f" types 'Q_ctrl', 'V_ctrl', 'PF_ctrl' or 'tan_phi_ctrl'\n")
+                self.control_modus = ControlModusEnum.q_ctrl
+        if isinstance(self.control_modus, str):
             try:
                 self.control_modus = ControlModusEnum(self.control_modus)
             except ValueError:
@@ -467,13 +531,16 @@ class BinarySearchControl(Controller):
         if ((isinstance(self.distribution_method, list)  #ruggedized code for miss input
              or isinstance(self.distribution_method, np.ndarray)) and isinstance(self.distribution_method[0], str)):
             self.distribution_method = self.distribution_method[0]
-        else:
+        if isinstance(self.distribution_method, str):
             try:
                 self.distribution_method = ControlModusEnum(self.distribution_method)
             except ValueError:
-                logger.warning(f"Control_modus {self.distribution_method} not recognized, using 'rel_P' from available"
-                               f" types 'rel_P', 'max_Q', 'set_Q', 'rel_V_pu' or 'rel_rated_S'\n")
-                self.distribution_method = ControlModusEnum.rel_P
+                logger.warning(f"Control_modus {getattr(self, 'distribution_method', None)} not recognized,"
+                       f" using 'rel_P' from available types 'rel_P', 'max_Q', 'set_Q', 'rel_V_pu' or 'rel_rated_S'\n")
+                if self.output_values_distribution is not None:
+                    self.distribution_method = ControlModusEnum.set_Q
+                else:
+                    self.distribution_method = ControlModusEnum.rel_P
         ###updating input & output elements in service lists
         self.input_element_in_service = []
         self.output_element_in_service = []
@@ -527,7 +594,7 @@ class BinarySearchControl(Controller):
         input_values = [] #reactive power q
         p_input_values = [] #active power p for power factor controllers
         counter = 0
-        if self.input_element != 'res_bus':
+        if self.input_element != 'res_bus' and self.input_element != "res_gen":  # and not any(getattr(net.controller.at[x, 'object'], 'controller_idx', False) ==
             for input_index in self.input_element_index:
                 if self.input_element_in_service[counter]: # input element not in service
                     input_values.append(read_from_net(net, self.input_element, input_index,
@@ -567,25 +634,20 @@ class BinarySearchControl(Controller):
 
         # read previously set values
         # compare old and new set values
-        if self.control_modus in ControlModusEnum.q_modes() or (self.control_modus in ControlModusEnum.v_modes() and
-                                                              self.input_element_index is None):
+        if self.control_modus in ControlModusEnum.q_modes() or (self.control_modus in ControlModusEnum.v_modes()
+                        and self.control_modus in ControlModusEnum.droop_modes() and self.bus_idx is None):
             if self.control_modus in ControlModusEnum.v_modes():
                 logger.warning('Missing attribute self.input_element_index, defaulting to Q_ctrl\n')
                 self.control_modus = ControlModusEnum.q_ctrl
             self.diff_old = self.diff
-            if not any(self.output_adjustable):
-                logging.info('All stations controlled by %s reached reactive power limits.' %self.name)
-                self.converged = True
-                return self.converged
+            if self.diff is None: #first step for assured bsc_ctrl_step
+                self.diff = 1
             else:
                 # adapt output adjustable depending on in_service
                 self.output_adjustable = np.array([in_service and adjustable for in_service, adjustable in zip(
-                    self.output_element_in_service, self.output_adjustable
-                )], dtype=bool)
-
+                    self.output_element_in_service, self.output_adjustable)], dtype=bool)
                 # normalize the values distribution
                 self._normalize_distribution_in_service()
-
                 self.diff = self.set_point - sum(input_values)
             self.converged = np.all(np.abs(self.diff) < self.tol)
         elif self.control_modus in ControlModusEnum.pf_modes():
@@ -636,19 +698,63 @@ class BinarySearchControl(Controller):
                         f"Deprecated Control Modus in Controller {self.index}, using Q_ctrl from available types\n")
                 self.control_modus = ControlModusEnum.q_ctrl
             if self.control_modus in ControlModusEnum.v_modes():
-                if self.input_element != 'res_bus' and not any(getattr(net.controller.at[x, 'object'], 'controller_idx', False) ==
-                                                                        self.index for x in net.controller.index):
-                    logger.warning(f"'input_element' must be 'res_bus' for V_ctrl not {self.input_element}, correcting.")
-                    self.input_element = 'res_bus'
-                    if np.atleast_1d(self.input_variable)[0] != 'vm_pu':
-                        logger.warning(f"'input_variable' must be 'vm_pu' for V_ctrl not {self.input_variable}, correcting ")
-                        self.input_variable = 'vm_pu'
-                self.diff_old = self.diff #V_ctrl
-                if self.diff is None:  # first step for assured bsc_ctrl_step
-                    self.diff = 1
+                if self.input_element != 'res_bus':  # and not any(getattr(net.controller.at[x, 'object'], 'controller_idx', False) ==
+                    if hasattr(self, 'bus_idx') and getattr(self, 'bus_idx') is not None:  # legacy
+                        self.diff_old = self.diff
+                        if not any(self.output_adjustable):
+                            logging.info(
+                                'Q_ctrl: All stations controlled by %s reached reactive power limits.' % self.name)
+                            self.converged = True
+                            return self.converged
+                        else:
+                            # adapt output adjustable depending on in_service
+                            self.output_adjustable = np.array([in_service and adjustable for in_service, adjustable
+                                                               in zip(self.output_element_in_service,
+                                                                      self.output_adjustable)], dtype=bool)
+
+                            # normalize the values distribution
+                            self._normalize_distribution_in_service()
+
+                        self.diff = self.set_point - net.res_bus.vm_pu.at[self.bus_idx]
+                        self.converged = np.all(np.abs(self.diff) < self.tol)
+                    else:
+                        logger.warning(f"'input_element' must be 'res_bus' for V_ctrl not {self.input_element}, correcting.")
+                        self.input_element = 'res_bus'
+                        if np.atleast_1d(self.input_variable)[0] != 'vm_pu':
+                            logger.warning(f"'input_variable' must be 'vm_pu' for V_ctrl not {self.input_variable}, correcting ")
+                            self.input_variable = 'vm_pu'
+                        self.diff_old = self.diff  # V_ctrl
+                        if not any(self.output_adjustable):
+                            logging.info(
+                                'V_ctrl: All stations controlled by %s reached reactive power limits.' % self.name)
+                            self.converged = True
+                            return self.converged
+                        else:
+                            # adapt output adjustable depending on in_service
+                            self.output_adjustable = np.array([in_service and adjustable for in_service, adjustable
+                                                               in zip(self.output_element_in_service, self.output_adjustable)], dtype=bool)
+
+                            # normalize the values distribution
+                            self._normalize_distribution_in_service()
+
+                        self.diff = self.set_point - net.res_bus.vm_pu.at[np.atleast_1d(self.input_element_index)[0]]
+                        self.converged = np.all(np.abs(self.diff) < self.tol)
                 else:
+                    self.diff_old = self.diff  # V_ctrl
+                    if not any(self.output_adjustable):
+                        logging.info('V_ctrl: All stations controlled by %s reached reactive power limits.' % self.name)
+                        self.converged = True
+                        return self.converged
+                    else:
+                        # adapt output adjustable depending on in_service
+                        self.output_adjustable = np.array([in_service and adjustable for in_service, adjustable
+                                                           in zip(self.output_element_in_service, self.output_adjustable)], dtype=bool)
+
+                        # normalize the values distribution
+                        self._normalize_distribution_in_service()
+
                     self.diff = self.set_point - net.res_bus.vm_pu.at[np.atleast_1d(self.input_element_index)[0]]
-                self.converged = np.all(np.abs(self.diff) < self.tol)
+                    self.converged = np.all(np.abs(self.diff) < self.tol)
             else:
                 if self.control_modus not in ControlModusEnum.q_modes():
                     logger.warning(f"No Controller Modus specified for Controller {self.index}, using Q_ctrl.\n"
@@ -688,21 +794,23 @@ class BinarySearchControl(Controller):
                         logger.warning(f'Controller {self.index}: Generator {self.output_element} {self.output_element_index[i]}'
                             f' exceeded maximum Voltage at bus {self.bus_idx_dist[i]}: {vm_pu[i]} < {v_min_pu[i]}\n')
             if len(self.min_q_mvar) == len(self.max_q_mvar) == len(self.output_element_in_service):
-
-                exceed_limit_min = np.where(np.atleast_1d(self.output_values)[np.atleast_1d(self.output_element_in_service)]
-                                            < np.atleast_1d(self.min_q_mvar)[np.atleast_1d(self.output_element_in_service)])[0]
-                exceed_limit_max = np.where(np.atleast_1d(self.output_values)[np.atleast_1d(self.output_element_in_service)]
-                                            > np.atleast_1d(self.max_q_mvar)[np.atleast_1d(self.output_element_in_service)])[0]
+                exceed_limit_min = np.flatnonzero(np.atleast_1d(self.output_values)[np.atleast_1d(self.output_element_in_service)]
+                                                  < np.atleast_1d(self.min_q_mvar)[np.atleast_1d(self.output_element_in_service)])
+                exceed_limit_max = np.flatnonzero(np.atleast_1d(self.output_values)[np.atleast_1d(self.output_element_in_service)]
+                                                  > np.atleast_1d(self.max_q_mvar)[np.atleast_1d(self.output_element_in_service)])
                 for i in exceed_limit_max:
                     logger.warning(f'Controller {self.index} converged but the Reactive Power Output for Element '
-                f'{self.output_element}: {self.output_element_index[i]} exceeds upper limits: {self.output_values[i]} > {self.max_q_mvar[i]}\n')
+                                   f'{self.output_element}: {self.output_element_index[i]} exceeds upper limits: {self.output_values[i]} > {self.max_q_mvar[i]}\n')
                 for i in exceed_limit_min:
                     logger.warning(f'Controller {self.index} converged but the Reactive Power Output for Element '
-                   f'{self.output_element}: {self.output_element_index[i]} falls short of lower limit: {self.output_values[i]} < {self.min_q_mvar[i]}\n')
+                                   f'{self.output_element}: {self.output_element_index[i]} falls short of lower limit: {self.output_values[i]} < {self.min_q_mvar[i]}\n')
             else:
                 logger.warning(f'Mismatching number of minimum and maximum limits of the output elements in Controller {self.index}.'
-                                           f'Possible exceedance of output element {self.output_element}'
+                               f'Possible exceedance of output element {self.output_element}'
                                f' {str(np.array(self.output_element_index))} limits\n')
+                self.diff = self.set_point - sum(input_values)
+                self.converged = np.all(np.abs(self.diff) < self.tol)
+        ###check convergence of linked droop controller (if exists)
         if self.converged and net.controller['object'].apply(
                 lambda obj: getattr(obj, 'controller_idx', None) == self.index and not getattr(obj, 'converged', True)).any()\
                 or getattr(self, 'applied_distribution', False) is False: #force appliance of distribution
@@ -729,7 +837,7 @@ class BinarySearchControl(Controller):
                     logger.warning(
                         f'Mismatched lengths of output elements {self.output_element} and output_values_distribution'
                         f'{len(np.array(self.output_element_in_service))} > {len(self.output_values_distribution)}'
-                        f' in Controller {self.index}.\n' f'Appending values {equal_val} \n')
+                        f' in Controller {self.index}.\n Appending values {equal_val} \n')
                     self.output_values_distribution = (np.append(self.output_values_distribution, [equal_val] *
                                                                  (len(self.output_element_in_service) - len(self.output_values_distribution))))
                 output_element_in_service = np.array(self.output_element_in_service)#ruggedizing code for wrong inputs
@@ -773,7 +881,7 @@ class BinarySearchControl(Controller):
                 self.v_max_pu = output_distribution_values[:, 2]
                 output_distribution_values_in_service = None
             else: self.output_values_distribution, output_distribution_values_in_service = None, None#rel_rated_S and rel_P, max_Q
-        else: raise UserWarning(f"Output_values_destribution in Controller {self.index} is {self.output_values_distribution}")
+        else: raise UserWarning(f"Output_values_distribution in Controller {self.index} is {self.output_values_distribution}")
 
         ###calculate output values###
         if self.output_values_old is None:  # first step
@@ -782,7 +890,7 @@ class BinarySearchControl(Controller):
             np.atleast_1d(self.output_values)[self.output_element_in_service] + 1e-3)
             positions_not_adjustable = [i for i, val in enumerate(self.output_adjustable) if not val]
             for i in positions_not_adjustable:
-                if np.atleast_1d(self.distribution_method)[i] == 0 or not self.output_element_in_service[i]:
+                if np.atleast_1d(self.output_values_distribution)[i]==0 or not self.output_element_in_service[i] :
                     self.output_values[i] = 0
                 else:
                     continue
@@ -792,15 +900,15 @@ class BinarySearchControl(Controller):
             x = self.output_values - self.diff * (self.output_values - self.output_values_old) / np.where(
                 step_diff == 0, 1e-6, step_diff)  #converging
             if any((abs(x) - abs(2 * self.output_values)) > 100): #catching overshoots for calculation, another check before writing into the net
-                x[np.where((abs(x) > abs(100 - abs(self.output_values))))[0]] = np.sign(x[np.where((abs(x) -
-                                                                           abs(2 * self.output_values)) > 100)[0]]) * 100
+                x[np.nonzero((abs(x) > abs(100 - abs(self.output_values))))] = np.sign(x[np.nonzero((abs(x) -
+                                                                           abs(2 * self.output_values)) > 100)]) * 100
             ###calculate the distribution of the output values
             if self.distribution_method == ControlModusEnum.imported: #when importing net from PF for backwards compatibility
                 distribution = output_distribution_values_in_service
 
             elif self.distribution_method == ControlModusEnum.rel_P: #proportional to the dispatch active power
                 dispatched_active_power = read_from_net(net, self.output_element, self.output_element_index, 'p_mw', 'auto')
-                dispatched_active_power = dispatched_active_power[np.array(self.output_element_in_service)]
+                dispatched_active_power = np.atleast_1d(dispatched_active_power)[np.array(self.output_element_in_service)]
                 distribution = dispatched_active_power/sum(dispatched_active_power)
 
             elif self.distribution_method == ControlModusEnum.rel_rated_S: #proportional to the rated apparent power
@@ -813,10 +921,10 @@ class BinarySearchControl(Controller):
                     distribution = s_rated_mva
                     nan_index = np.isnan(distribution)
                     distribution[nan_index] = 50
-                    if any(nan_index):
+                    if any(np.atleast_1d(nan_index)):
                         logger.warning(f'{self.output_element} at index {np.atleast_1d(self.output_element_index)[nan_index]}'
                                        f' in Controller {self.index} has no specified rated apparent power, assuming 50 MVA\n')
-                    if not all(isinstance(n, numbers.Number) for n in distribution):
+                    if not all(isinstance(n, numbers.Number) for n in np.atleast_1d(distribution)):
                         logger.warning(f'{self.output_element} in Controller {self.index} has no'
                                        f' specified rated apparent power, assuming 50 MVA\n')
                         distribution = np.full(np.sum(self.output_element_in_service), 50)
@@ -871,7 +979,7 @@ class BinarySearchControl(Controller):
                             busbar_gen_gen = list(np.where(np.bincount(np.array(net.gen['bus'])) > 1)[0]) #gens and gens
                             busbar_gen_gen = False if len(busbar_gen_gen) == 0 else busbar_gen_gen #False if array empty
                             busbar_all = [busbar_gen_gen, busbar_sgen_sgen, busbar_gen_sgen] #merge all indices
-                            if not not any(busbar_all):#not all busbar with multiple output elements?
+                            if any(busbar_all):#not all busbar with multiple output elements?
                                 busbar_all = np.array([x for x in busbar_all if x != False][0]) #delete bools
                                 index_sgen = np.where(np.isin(net.sgen['bus'], busbar_all))[0] #indices of sgens
                                 index_sgen = [index for i, index in enumerate(index_sgen) if list(net.sgen['in_service'])[i]]#check for service
@@ -923,16 +1031,16 @@ class BinarySearchControl(Controller):
                                     in_service = net.sgen.at[i, 'in_service'],
                                     sn_mva = net.sgen.at[i, 'sn_mva'] if 'sn_mva' in net.sgen.columns else None,
                                     scaling = net.sgen.at[i, 'scaling'] if 'scaling' in net.sgen.columns else None,
-                                    min_p_mw = net.sgen.at[i, 'min_p_mw'] if 'min_p_mw' in net.sgen.columns else None,
-                                    max_p_mw = net.sgen.at[i, 'max_p_mw'] if 'max_p_mw' in net.sgen.columns else None,
-                                    min_q_mvar = net.sgen.at[i, 'min_q_mvar'] if 'min_q_mvar' in net.sgen.columns else None,
-                                    max_q_mvar = net.sgen.at[i, 'max_q_mvar'] if 'max_q_mvar' in net.sgen.columns else None,
+                                    min_p_mw = net.sgen.at[i, 'min_p_mw'] if 'min_p_mw' in net.sgen.columns else 0, #for value other then inf min and max must be given
+                                    max_p_mw = net.sgen.at[i, 'max_p_mw'] if 'max_p_mw' in net.sgen.columns else 9999,
+                                    min_q_mvar = net.sgen.at[i, 'min_q_mvar'] if 'min_q_mvar' in net.sgen.columns and np.isfinite(net.sgen.at[i, 'min_q_mvar']) else -20,
+                                    max_q_mvar = net.sgen.at[i, 'max_q_mvar'] if 'max_q_mvar' in net.sgen.columns and np.isfinite(net.sgen.at[i, 'max_q_mvar']) else 20,
                                     description = net.sgen.at[i, 'description'] if 'description' in net.sgen.columns else None,
                                     equipment = net.sgen.at[i, 'equipment'] if 'equipment' in net.sgen.columns else None,
                                     geo = net.sgen.at[i, 'geo'] if 'geo' in net.sgen.columns else None,
                                     current_source = net.sgen.at[
                                         i, 'current_source'] if 'current_source' in net.sgen.columns else None,
-                                    name = f'temp_gen_{counter}')#type='GEN'
+                                    name = f'temp_gen_{counter}')#type 'GEN'
                             net.sgen.at[i, 'in_service'] = False #disable sgens
                             counter += 1
                     index = np.array([])
@@ -998,9 +1106,8 @@ class BinarySearchControl(Controller):
                         x[i] = 0  # reset value to 0 because station is out of service
 
             else:
-                if (not self.distribution_method == ControlModusEnum.max_Q and
-                        not self.distribution_method == ControlModusEnum.rel_V_pu):
-                    x = sum(x) * distribution
+                if self.distribution_method != ControlModusEnum.max_Q and self.distribution_method != ControlModusEnum.rel_V_pu:
+                    x = sum(np.atleast_1d(x)) * distribution
 
             if self.output_adjustable is not None and net._options[
                 'enforce_q_lims']:  # none if output element is a shunt
@@ -1131,8 +1238,8 @@ class BinarySearchControl(Controller):
     def _normalize_distribution_in_service(self, initial_pf_distribution=None):
         # normalize distribution depending on in service of stations
         if initial_pf_distribution is None:
-            if type(self.output_values_distribution) == str or getattr(self, 'output_values_distribution', None) is None:
-                distribution = np.ones(len(self.output_element_in_service))/len(self.output_element_in_service)
+            if isinstance(self.output_values_distribution, str) or getattr(self, 'output_values_distribution', None) is None:
+                distribution = np.ones(len(np.atleast_1d(self.output_element_in_service)))/len(np.atleast_1d(self.output_element_in_service))
             else: distribution = self.output_values_distribution
         else:
             distribution = initial_pf_distribution
@@ -1149,23 +1256,25 @@ class BinarySearchControl(Controller):
 
     def _update_min_max_q_mvar(self, net):
         if 'min_q_mvar' in net[self.output_element].columns:
-            if not np.all(np.isnan(net[self.output_element].loc[self.output_element_index, 'id_q_capability_characteristic'].values)):
+            if not np.all(np.isnan(pd.array(pd.Series(net[self.output_element].loc[self.output_element_index, 'id_q_capability_characteristic']).values, dtype="Int64"))):
                 qmin, _ = get_min_max_q_mvar_from_characteristics_object(net, self.output_element, self.output_element_index)
                 self.output_min_q_mvar = np.nan_to_num(qmin, nan=-np.inf)
                 net[self.output_element].loc[self.output_element_index, 'min_q_mvar'] = self.output_min_q_mvar
             else:
-                self.output_min_q_mvar = np.nan_to_num(net[self.output_element].loc[self.output_element_index, 'min_q_mvar'].values, nan=-np.inf)
+                self.output_min_q_mvar = np.nan_to_num(pd.Series(
+                    net[self.output_element].loc[self.output_element_index, 'min_q_mvar']).values, nan=-np.inf)
                 net[self.output_element].loc[self.output_element_index, 'min_q_mvar'] = self.output_min_q_mvar
         else:
             self.output_min_q_mvar = list(np.array([-np.inf]*len(self.output_element_index), dtype=np.float64))
 
         if 'max_q_mvar' in net[self.output_element].columns:
-            if not np.all(np.isnan(net[self.output_element].loc[self.output_element_index, 'id_q_capability_characteristic'].values)):
+            if not np.all(np.isnan(pd.array(pd.Series(net[self.output_element].loc[self.output_element_index, 'id_q_capability_characteristic']).values, dtype="Int64"))):
                 _, qmax = get_min_max_q_mvar_from_characteristics_object(net, self.output_element, self.output_element_index)
                 self.output_max_q_mvar = np.nan_to_num(qmax, nan=np.inf)
                 net[self.output_element].loc[self.output_element_index, 'max_q_mvar'] = self.output_max_q_mvar
             else:
-                self.output_max_q_mvar = np.nan_to_num(net[self.output_element].loc[self.output_element_index, 'max_q_mvar'].values, nan=np.inf)
+                self.output_max_q_mvar = np.nan_to_num(pd.Series(
+                    net[self.output_element].loc[self.output_element_index, 'max_q_mvar']).values, nan=np.inf)
                 net[self.output_element].loc[self.output_element_index, 'max_q_mvar'] = self.output_max_q_mvar
         else:
             self.output_max_q_mvar = np.array([np.inf]*len(self.output_element_index), dtype=np.float64)
@@ -1371,12 +1480,12 @@ class DroopControl(Controller):
                         f"'voltage_ctrl' in Controller {self.index} is deprecated. "
                         "Use 'control_modus' ('Q_ctrl', 'V_ctrl', etc.) instead.")
                     self._deprecation_warned = True
-        ###atching old implementation
-        if type(self.control_modus) == bool and self.control_modus == True:
+        ###catching old implementation
+        if isinstance(self.control_modus, bool) and self.control_modus == True:
             self.control_modus = ControlModusEnum.v_ctrl_q_droop
             logger.warning(f"Deprecated Control Modus in Controller {self.index}, using V_ctrl with Q droop from available types"
-                         f" 'Q_ctrl', 'V_ctrl' or 'PF_ctrl'\n")
-        elif type(self.control_modus) == bool and self.control_modus == False:
+                         f" V_ctrl, 'Q_ctrl' or 'PF_ctrl'\n")
+        elif isinstance(self.control_modus, bool) and self.control_modus == False:
             self.control_modus = ControlModusEnum.q_ctrl_v_droop
             logger.warning(f"Deprecated Control Modus in Controller {self.index}, using Q_ctrl with V droop from available types"
                          f" 'Q_ctrl', 'V_ctrl' or 'PF_ctrl'\n")

@@ -2467,7 +2467,7 @@ def create_sgen_sym(net, item, pv_as_slack, pf_variable_p_gen, dict_net, export_
             else:
                 i_ctrl = pstac.i_ctrl
                 if i_ctrl == 0:
-                    av_mode = 'constv'#'constq'#why not constv? Ahh, only sgen implemented
+                    av_mode = 'constv'
                 elif i_ctrl == 1:
                     av_mode = 'constq'
                 elif i_ctrl == 2:
@@ -2609,6 +2609,48 @@ def create_sgen_asm(net, item, pf_variable_p_gen, dict_net, export_ctrl):
             elif i_ctrl == 3:
                 av_mode = 'constq' #tanphi
 
+    logger.debug('av_mode: %s' % av_mode)
+    if av_mode == 'constv':
+        logger.debug('creating asym %s as gen' % item.loc_name)
+        vm_pu = item.usetp
+        if pstac is not None and not pstac.outserv and export_ctrl:
+            try:
+                vm_pu = item.GetAttribute('m:u:bus1')
+            except AttributeError:
+                if not pstac.uset_mode:
+                    vm_pu = pstac.usetp
+                else:
+                    vm_pu = pstac.cpCtrlNode.vtarget  # Bus target voltage
+        #if item.iqtype == 1:
+        #    sid = create_gen(net, bus=bus, p_mw=item.pgini * multiplier, vm_pu=vm_pu,
+        #                     min_q_mvar=type.Q_min, max_q_mvar=type.Q_max,
+        #                     min_p_mw=item.Pmin_uc, max_p_mw=item.Pmax_uc,
+        #                     name=item.loc_name, type=cat, in_service=in_service, scaling=global_scaling)
+        #else:
+        type = item.typ_id
+        sid = create_gen(net, bus=bus, p_mw=item.pgini * multiplier, vm_pu=vm_pu,
+                         min_q_mvar=item.cQ_min, max_q_mvar=item.cQ_max,
+                         min_p_mw=item.Pmin_uc, max_p_mw=item.Pmax_uc,
+                         name=item.loc_name, type=cat, in_service=in_service, scaling=global_scaling)
+        element = 'gen'
+    elif av_mode == 'constq':
+        try:
+            q_mvar = item.GetAttribute('m:Q:bus1') * multiplier
+        except AttributeError:
+            q_mvar = item.ng_num * item.qgini * multiplier if item.bustp == 'PQ' else q_res
+        #if item.iqtype == 1:
+        #    type = item.typ_id
+        #    sid = create_sgen(net, bus=bus, p_mw=item.pgini * multiplier, q_mvar=q_mvar,
+        #                      min_q_mvar=type.Q_min, max_q_mvar=type.Q_max,
+        #                      min_p_mw=item.Pmin_uc, max_p_mw=item.Pmax_uc,
+        #                      name=item.loc_name, type=cat, in_service=in_service, scaling=global_scaling)
+        #else:
+        type = item.typ_id
+        sid = create_sgen(net, bus=bus, p_mw=item.pgini * multiplier, q_mvar=q_mvar,
+                          min_q_mvar=item.cQ_min, max_q_mvar=item.cQ_max,
+                          min_p_mw=item.Pmin_uc, max_p_mw=item.Pmax_uc,
+                          name=item.loc_name, type=cat, in_service=in_service, scaling=global_scaling)
+        element = 'sgen'
 
     logger.debug('av_mode: %s' % av_mode)
     if av_mode == 'constv':
