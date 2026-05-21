@@ -25,6 +25,7 @@ import networkx
 import numpy
 import geojson
 import pandas as pd
+from enum import Enum
 from networkx.readwrite import json_graph
 from numpy import ndarray, generic, equal, isnan, allclose, any as anynp
 
@@ -237,15 +238,18 @@ def df_to_coords(net, item, table):
             net[item].loc[i, "coords"] = coord
 
 
-def from_dict_of_dfs(dodfs, net=None):
+def from_dict_of_dfs(dodfs, net=None, add_basic_std_types=True):
     if net is None:
-        net = create_empty_network()
+        net = create_empty_network(add_stdtypes=add_basic_std_types)
     for item, table in dodfs.items():
         if item == "dtypes":
             continue
         elif item == "parameters":
             for c in dodfs["parameters"].columns:
-                net[c] = dodfs["parameters"].at[0, c]
+                val = dodfs["parameters"].at[0, c]
+                if isinstance(val, (bool, np.bool_)):
+                    val = bool(val)
+                net[c] = val
                 if c == "name" and pd.isnull(net[c]):
                     net[c] = ''
             continue
@@ -1050,6 +1054,14 @@ def json_dataframe(obj):
 
     return d
 
+@to_serializable.register(Enum)
+def json_enum(obj):
+    return with_signature(
+        obj,
+        obj.value,
+        obj_module=obj.__class__.__module__,
+        obj_class=obj.__class__.__name__,
+    )
 
 if GEOPANDAS_INSTALLED:
     @to_serializable.register(geopandas.GeoDataFrame)

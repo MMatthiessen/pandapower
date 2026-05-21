@@ -166,7 +166,7 @@ def from_pf(
     # create asynchronous machines:
     n = 0
     for n, asm in enumerate(dict_net['ElmAsm'], n):
-        create_sgen_asm(net=net, item=asm, pf_variable_p_gen=pf_variable_p_gen, dict_net=dict_net)
+        create_sgen_asm(net=net, item=asm, pf_variable_p_gen=pf_variable_p_gen, dict_net=dict_net, export_ctrl=export_controller)
     if n > 0: logger.info('imported %d asynchronous machines' % n)
 
     logger.debug('creating synchronous machines')
@@ -2183,7 +2183,7 @@ def create_sgen_genstat(net, item, pv_as_slack, pf_variable_p_gen, dict_net, is_
         pstac = item.c_pstac  # None if station controller is not available
         if pstac is not None and not pstac.outserv and export_ctrl:
             if pstac.i_droop and pstac.i_ctrl == 0:
-                av_mode = 'constv'#'constq' #todo obsolete?
+                av_mode = 'constv'
             else:
                 if pstac.i_ctrl == 0:
                     av_mode = 'constv'#'constq'#why? shouldnt it be constv? Only sgen element?
@@ -2191,14 +2191,8 @@ def create_sgen_genstat(net, item, pv_as_slack, pf_variable_p_gen, dict_net, is_
                     av_mode = 'constq'
                 elif pstac.i_ctrl == 2:
                     av_mode='constq' #other devices
-                    #av_mode = 'cosphi'
-                    #logger.error('Error! av_mode cosphi not implemented')
-                    #return #implemented
                 elif pstac.i_ctrl == 3:
                     av_mode='constq' #implementing other devices?
-                    #av_mode = 'tanphi'
-                    #logger.error('Error! av_mode tanphi not implemented')
-                    #return #implemented
                 else:
                     logger.error('Error! av_mode undefined')
                     return
@@ -2236,7 +2230,7 @@ def create_sgen_genstat(net, item, pv_as_slack, pf_variable_p_gen, dict_net, is_
                                               input_inverted=[False], input_element_index=[next_index],
                                               set_point=item.usetp, control_modus = "V_ctrl_Q_droop_local", bus_idx=bus, tol=1e-5)
                     VDroopControl_local(net, name=item.loc_name + "_ctrl", q_droop_mvar=item.sgn * 100 / ddroop,
-                                        q_set_mvar=item.qgini, vm_set_pu_bsc=item.usetp, bus_idx=bus,
+                                        q_set_mvar=item.qgini, vm_set_pu_bsc=item.usetp, control_modus = "V_ctrl_Q_droop_local", bus_idx=bus,
                                         controller_idx=bsc.index)
             del params['q_mvar']
 
@@ -2478,14 +2472,8 @@ def create_sgen_sym(net, item, pv_as_slack, pf_variable_p_gen, dict_net, export_
                     av_mode = 'constq'
                 elif i_ctrl == 2:
                     av_mode='constq'
-                    #av_mode = 'cosphi'#what element could be created?
-                    #logger.error('Error! avmode cosphi not implemented')
-                    #return
                 elif i_ctrl == 3:
                     av_mode= 'constq'
-                    #av_mode = 'tanphi' #what element could be created?
-                    #logger.error('Error! avmode tanphi not implemented')
-                    #return
 
         logger.debug('av_mode: %s' % av_mode)
         if av_mode == 'constv':
@@ -2519,7 +2507,7 @@ def create_sgen_sym(net, item, pv_as_slack, pf_variable_p_gen, dict_net, export_
             try:
                 q_mvar = item.GetAttribute('m:Q:bus1') * multiplier
             except AttributeError:
-                q_mvar = ngnum * item.qgini * multiplier
+                q_mvar = item.ngnum * item.qgini * multiplier
             if item.iqtype == 1:
                 type = item.typ_id
                 sid = create_sgen(net, bus=bus1, p_mw=p_mw, q_mvar=q_mvar,
@@ -2559,10 +2547,12 @@ def create_sgen_sym(net, item, pv_as_slack, pf_variable_p_gen, dict_net, export_
     logger.debug('created genstat <%s> at index <%d>' % (name, sid))
 
 
-def create_sgen_asm(net, item, pf_variable_p_gen, dict_net):
+def create_sgen_asm(net, item, pf_variable_p_gen, dict_net, export_ctrl):
     is_motor = bool(item.i_mot)
     global_scaling = dict_net['global_parameters']['global_motor_scaling'] if is_motor else \
         dict_net['global_parameters']['global_generation_scaling']
+
+    av_mode = item.av_mode
 
     multiplier = get_power_multiplier(item, pf_variable_p_gen)
     p_res = item.GetAttribute('pgini') * multiplier
@@ -2594,21 +2584,87 @@ def create_sgen_asm(net, item, pf_variable_p_gen, dict_net):
         'scaling': global_scaling
     }
 
-    logger.debug('params: %s' % params)
+    categories = {"wgen": "WKA", "pv": "PV", "reng": "REN", "stg": "SGEN"}
+    # category (wind, PV, etc):
+    try:
+        cat = categories[item.aCategory]
+    except KeyError:
+        cat = 'SGEN'
+        logger.debug('sgen <%s> with category <%s> imported as <%s>' %
+                     (item.loc_name, item.aCategory, cat))
 
-    sid = create_sgen(net, **params)
+    pstac = item.c_pstac
+    # None if station controller is not available
+    if pstac is not None and not pstac.outserv and export_ctrl:
+        if pstac.i_droop:
+            av_mode = 'constq'
+        else:
+            i_ctrl = pstac.i_ctrl
+            if i_ctrl == 0:
+                av_mode = 'constq'
+            elif i_ctrl == 1:
+                av_mode = 'constq'
+            elif i_ctrl == 2:
+                av_mode = 'constq' #cosphi
+            elif i_ctrl == 3:
+                av_mode = 'constq' #tanphi
 
-    net.sgen.loc[sid, 'description'] = ' \n '.join(item.desc) if len(item.desc) > 0 else ''
-    attr_dict={"for_name": "equipment", "cimRdfId": "origin_id",  "cpSite.loc_name": "site", "c_pstac.loc_name": "sta_ctrl"}
-    add_additional_attributes(item, net, "sgen", sid, attr_dict=attr_dict,
-                              attr_list=["sernum", "chr_name"])
 
-    if item.HasResults(0):
-        net.res_sgen.at[sid, 'pf_p'] = item.GetAttribute('m:P:bus1') * multiplier
-        net.res_sgen.at[sid, 'pf_q'] = item.GetAttribute('m:Q:bus1') * multiplier
-    else:
-        net.res_sgen.at[sid, 'pf_p'] = np.nan
-        net.res_sgen.at[sid, 'pf_q'] = np.nan
+    logger.debug('av_mode: %s' % av_mode)
+    if av_mode == 'constv':
+        logger.debug('creating asym %s as gen' % item.loc_name)
+        vm_pu = item.usetp
+        if pstac is not None and not pstac.outserv and export_ctrl:
+            try:
+                vm_pu = item.GetAttribute('m:u:bus1')
+            except AttributeError:
+                if not pstac.uset_mode:
+                    vm_pu = pstac.usetp
+                else:
+                    vm_pu = pstac.cpCtrlNode.vtarget  # Bus target voltage
+        type = item.typ_id
+        sid = create_gen(net, bus=bus, p_mw=item.pgini * multiplier, vm_pu=vm_pu,
+                         min_q_mvar=item.cQ_min, max_q_mvar=item.cQ_max,
+                         min_p_mw=item.Pmin_uc, max_p_mw=item.Pmax_uc,
+                         name=item.loc_name, type=cat, in_service=in_service, scaling=global_scaling)
+        element = 'gen'
+    elif av_mode == 'constq':
+        try:
+            q_mvar = item.GetAttribute('m:Q:bus1') * multiplier
+        except AttributeError:
+            q_mvar = item.ng_num * item.qgini * multiplier if item.bustp == 'PQ' else q_res
+        type = item.typ_id
+        sid = create_sgen(net, bus=bus, p_mw=item.pgini * multiplier, q_mvar=q_mvar,
+                          min_q_mvar=item.cQ_min, max_q_mvar=item.cQ_max,
+                          min_p_mw=item.Pmin_uc, max_p_mw=item.Pmax_uc,
+                          name=item.loc_name, type=cat, in_service=in_service, scaling=global_scaling)
+        element = 'sgen'
+
+    if element == "gen":
+        net.gen.loc[sid, 'description'] = ' \n '.join(item.desc) if len(item.desc) > 0 else ''
+        attr_dict = {"for_name": "equipment", "cimRdfId": "origin_id", "cpSite.loc_name": "site",
+                     "c_pstac.loc_name": "sta_ctrl"}
+        add_additional_attributes(item, net, "gen", sid, attr_dict=attr_dict,
+                                  attr_list=["sernum", "chr_name"])
+
+        if item.HasResults(0):
+            net.res_gen.at[sid, 'pf_p'] = item.GetAttribute('m:P:bus1') * multiplier
+            net.res_gen.at[sid, 'pf_q'] = item.GetAttribute('m:Q:bus1') * multiplier
+        else:
+            net.res_gen.at[sid, 'pf_p'] = np.nan
+            net.res_gen.at[sid, 'pf_q'] = np.nan
+    elif element == "sgen":
+        net.sgen.loc[sid, 'description'] = ' \n '.join(item.desc) if len(item.desc) > 0 else ''
+        attr_dict={"for_name": "equipment", "cimRdfId": "origin_id",  "cpSite.loc_name": "site", "c_pstac.loc_name": "sta_ctrl"}
+        add_additional_attributes(item, net, "sgen", sid, attr_dict=attr_dict,
+                                  attr_list=["sernum", "chr_name"])
+
+        if item.HasResults(0):
+            net.res_sgen.at[sid, 'pf_p'] = item.GetAttribute('m:P:bus1') * multiplier
+            net.res_sgen.at[sid, 'pf_q'] = item.GetAttribute('m:Q:bus1') * multiplier
+        else:
+            net.res_sgen.at[sid, 'pf_p'] = np.nan
+            net.res_sgen.at[sid, 'pf_q'] = np.nan
 
 
 def create_trafo_type(net, item):
@@ -3831,7 +3887,7 @@ def create_svc(net, item, pv_as_slack, pf_variable_p_gen, dict_net):
         logger.debug('creating SVC %s as gen' % name)
         vm_pu = item.usetp
         in_service = monopolar_in_service(item)
-        svc = create_gen(net, bus=bus1[0], p_mw=0, vm_pu=vm_pu,
+        svc = create_gen(net, bus=bus1, p_mw=0, vm_pu=vm_pu,
                          name=name, type="SVC", in_service=in_service)
         element = 'gen'
 
@@ -4023,16 +4079,26 @@ def create_stactrl(net, item, top, top_all, **kwargs):
 
     gen_types = []
     for s in machines:
-        if s.ip_ctrl == 1:
-            gt = "other"
-        elif not hasattr(s, 'av_mode'):
-            gt = "other"
-        elif s.av_mode == "constq":
-            gt = "sgen"
-        elif s.av_mode == "constv":
-            gt = "gen"
+        if s.GetClassName() =='ElmAsm':
+            if not hasattr(s, 'av_mode'):
+                gt = "other"
+            elif s.av_mode == "constq":
+                gt = "sgen"
+            elif s.av_mode == "constv":
+                gt = "gen"
+            else:
+                gt = "other"
         else:
-            gt = "other"
+            if s.ip_ctrl == 1:
+                gt = "other"
+            elif not hasattr(s, 'av_mode'):
+                gt = "other"
+            elif s.av_mode == "constq":
+                gt = "sgen"
+            elif s.av_mode == "constv":
+                gt = "gen"
+            else:
+                gt = "other"
         gen_types.append(gt)
 
     for s in machines:
@@ -4142,15 +4208,6 @@ def create_stactrl(net, item, top, top_all, **kwargs):
     variable = None
     res_element_table = None
     res_element_index = None
-    # Create nx graph for further usage
-    # top is needed to check connectivity between inpout and output elements, therefore respect switches
-    # top_all is the full topology to identify the sign of measurements, that is why respect_switches = False
-    #top = create_nxgraph(net, respect_switches=True, include_lines=True, include_trafos=True,
-    #                     include_impedances=True, nogobuses=None, notravbuses=None, multi=True,
-    #                     calc_branch_impedances=False, branch_impedance_unit='ohm')
-    #top_all = create_nxgraph(net, respect_switches=False, include_lines=True, include_trafos=True,
-    #                         include_impedances=True, nogobuses=None, notravbuses=None, multi=True,
-    #                         calc_branch_impedances=False, branch_impedance_unit='ohm')
     if control_mode >= 1 or item.i_droop: #droop control
         #q_control_cubicle = item.p_cub if control_mode == 1 else item.pQmeas #Feld #pqmeas if V_ctrl and droop
         q_control_cubicle = item.p_cub if control_mode != 0 else item.pQmeas  #item.p_cub if other mode and droop?
@@ -4277,8 +4334,7 @@ def create_stactrl(net, item, top, top_all, **kwargs):
             logger.error(
                 f"{item}: only line, impedance, trafo 2W/3W element and switch flows can be controlled, {element_class[0]=}")
             return
-    #elif control_mode == 0:
-    else:
+    elif control_mode == 0:
         res_element_table = "res_bus"
     input_busses = []
     output_busses = []
